@@ -1,6 +1,6 @@
 """
-Training Pipeline for TinyML Collision Avoidance & Path Guidance Model
-Trains the multi-task neural network with Adam optimizer and validates safety metrics.
+Map-Aware Training Pipeline for TinyML Collision Avoidance & Path Guidance Model
+Trains the neural network on 100,000 mine-site encounter scenarios with Adam optimizer.
 """
 
 import os
@@ -18,15 +18,15 @@ def one_hot(y: np.ndarray, num_classes: int = 3) -> np.ndarray:
     return oh
 
 
-def train_model(epochs: int = 45, batch_size: int = 256, lr: float = 0.005):
-    print("=" * 70)
-    print("  TINYML COLLISION AVOIDANCE & PATH GUIDANCE MODEL TRAINING")
-    print("=" * 70)
+def train_model(epochs: int = 45, batch_size: int = 256, lr: float = 0.006):
+    print("=" * 75)
+    print("  MAP-AWARE TINYML COLLISION AVOIDANCE & PATH GUIDANCE TRAINING")
+    print("=" * 75)
 
     # 1. Generate Dataset
-    print("\n[1/4] Generating 60,000 synthetic haul-road encounter scenarios...")
+    print("\n[1/4] Generating 100,000 map-aligned haul-road encounter scenarios...")
     t0 = time.time()
-    X, y_risk, y_brake, y_steer = generate_haul_road_dataset(n_samples=60000, seed=42)
+    X, y_risk, y_brake, y_steer = generate_haul_road_dataset(n_samples=100000, seed=42)
     y_risk_oh = one_hot(y_risk, num_classes=3)
     print(f"      Dataset generated in {time.time() - t0:.2f}s | Shape: {X.shape}")
 
@@ -83,8 +83,7 @@ def train_model(epochs: int = 45, batch_size: int = 256, lr: float = 0.005):
     best_val_loss = float("inf")
 
     for epoch in range(1, epochs + 1):
-        # Learning rate schedule (cosine/step decay)
-        cur_lr = lr * (0.96 ** (epoch // 3))
+        cur_lr = lr * (0.95 ** (epoch // 3))
 
         # Shuffle training set
         perm = np.random.permutation(n_train)
@@ -111,33 +110,25 @@ def train_model(epochs: int = 45, batch_size: int = 256, lr: float = 0.005):
             (X_norm, z1, a1, z2, a2, z3, a3, _, _, _, _, _, _) = cache
 
             # Multi-Task Losses:
-            # 1. Cross-Entropy Loss on Risk Classification
             loss_risk = -np.sum(yb_risk * np.log(np.maximum(prob_risk, 1e-7))) / bs
-            # 2. MSE Loss on Brake Override
             loss_brake = np.mean((pred_brake - yb_brake) ** 2)
-            # 3. MSE Loss on Steer Guidance
             loss_steer = np.mean((pred_steer - yb_steer) ** 2)
 
             total_loss = loss_risk + 2.0 * loss_brake + 1.5 * loss_steer
             train_loss += total_loss * bs
 
             # Backward pass (Gradients)
-            # Head A: Risk (Softmax + Cross-Entropy gradient is simply (p - y))
             d_logits_risk = (prob_risk - yb_risk) / bs
             dW_risk = np.dot(a3.T, d_logits_risk)
             db_risk = np.sum(d_logits_risk, axis=0)
 
-            # Head B: Brake (Sigmoid + MSE gradient)
-            # d/d(logits) of MSE with sigmoid: 2*(pred - y) * pred*(1-pred) / bs
             d_pred_brake = 2.0 * (pred_brake - yb_brake) / bs
-            d_logits_brake = d_pred_brake * (pred_brake * (1.0 - pred_brake)) * 2.0  # weight 2.0
+            d_logits_brake = d_pred_brake * (pred_brake * (1.0 - pred_brake)) * 2.0
             dW_brake = np.dot(a3.T, d_logits_brake)
             db_brake = np.sum(d_logits_brake, axis=0)
 
-            # Head C: Steer (Tanh + MSE gradient)
-            # d/d(logits) of MSE with tanh: 2*(pred - y) * (1 - pred^2) / bs
             d_pred_steer = 2.0 * (pred_steer - yb_steer) / bs
-            d_logits_steer = d_pred_steer * (1.0 - pred_steer ** 2) * 1.5  # weight 1.5
+            d_logits_steer = d_pred_steer * (1.0 - pred_steer ** 2) * 1.5
             dW_steer = np.dot(a3.T, d_logits_steer)
             db_steer = np.sum(d_logits_steer, axis=0)
 
@@ -163,7 +154,7 @@ def train_model(epochs: int = 45, batch_size: int = 256, lr: float = 0.005):
             dW1 = np.dot(X_norm.T, dz1)
             db1 = np.sum(dz1, axis=0)
 
-            # Adam Parameter Update
+            # Adam Updates
             grads = {
                 "W1": dW1, "b1": db1,
                 "W2": dW2, "b2": db2,
@@ -195,9 +186,10 @@ def train_model(epochs: int = 45, batch_size: int = 256, lr: float = 0.005):
         val_preds_risk = np.argmax(prob_risk_val, axis=1)
         val_acc = np.mean(val_preds_risk == y_risk_val) * 100.0
 
-        # Critical collision recall (MUST be near 100%)
         critical_mask = (y_risk_val == 2)
         critical_recall = np.mean(val_preds_risk[critical_mask] == 2) * 100.0
+        safe_mask = (y_risk_val == 0)
+        safe_accuracy = np.mean(val_preds_risk[safe_mask] == 0) * 100.0
 
         brake_mae = np.mean(np.abs(pred_brake_val - y_brake_val))
         steer_mae = np.mean(np.abs(pred_steer_val - y_steer_val))
@@ -208,6 +200,7 @@ def train_model(epochs: int = 45, batch_size: int = 256, lr: float = 0.005):
                 f"Train Loss: {train_loss:.4f} | "
                 f"Val Loss: {val_total_loss:.4f} | "
                 f"Accuracy: {val_acc:.2f}% | "
+                f"Safe Accuracy: {safe_accuracy:.2f}% | "
                 f"Critical Recall: {critical_recall:.2f}% | "
                 f"Brake MAE: {brake_mae:.4f}"
             )
@@ -221,31 +214,28 @@ def train_model(epochs: int = 45, batch_size: int = 256, lr: float = 0.005):
     model.save(output_path)
     file_size_kb = os.path.getsize(output_path) / 1024.0
 
-    print("\n" + "=" * 70)
-    print("  TRAINING COMPLETE — MODEL BENCHMARK RESULTS")
-    print("=" * 70)
+    print("\n" + "=" * 75)
+    print("  MAP-AWARE TRAINING COMPLETE — BENCHMARK RESULTS")
+    print("=" * 75)
     print(f"  • Overall Validation Accuracy:      {val_acc:.2f}%")
+    print(f"  • Safe State Accuracy (No false alerts): {safe_accuracy:.2f}%")
     print(f"  • Critical Collision Recall (AEB):  {critical_recall:.2f}%  (Zero false negatives)")
     print(f"  • Braking Control MAE:              {brake_mae:.4f}")
     print(f"  • Steering Guidance MAE:            {steer_mae:.4f}")
-    print(f"  • Model Weight File Size:           {file_size_kb:.2f} KB  (Ultra-compact TinyML)")
+    print(f"  • Model Weight File Size:           {file_size_kb:.2f} KB")
 
     # Test single-sample inference latency
     test_sample = {
-        "ray_far_left": 45.0,
-        "ray_left": 30.0,
-        "ray_center": 9.5,  # Imminent obstacle
-        "ray_right": 25.0,
-        "ray_far_right": 50.0,
+        "ray_far_left": 15.0,
+        "ray_left": 18.0,
+        "ray_center": 8.5,  # Imminent obstacle
+        "ray_right": 22.0,
+        "ray_far_right": 16.0,
         "ray_rear": 40.0,
         "speed_kmh": 35.0,
         "steer_angle": 0.0,
         "lateral_offset": 0.0,
     }
-
-    # Warmup
-    for _ in range(100):
-        model.predict(test_sample)
 
     latencies = []
     for _ in range(1000):
@@ -255,18 +245,15 @@ def train_model(epochs: int = 45, batch_size: int = 256, lr: float = 0.005):
         latencies.append((t_end - t_start) * 1000.0)
 
     avg_latency = np.mean(latencies)
-    p99_latency = np.percentile(latencies, 99)
-
     print(f"  • Average Inference Latency:        {avg_latency:.4f} ms  ({avg_latency * 1000:.1f} microseconds!)")
-    print(f"  • 99th Percentile Latency (p99):    {p99_latency:.4f} ms")
-    print("=" * 70)
-    print("  Sample Prediction on 9.5m Obstacle at 35 km/h:")
+    print("=" * 75)
+    print("  Prediction on 8.5m in-lane obstacle at 35 km/h:")
     print(f"    - Collision Risk: {out['collision_risk']} (Conf: {out['confidence']*100:.1f}%)")
     print(f"    - Emergency Brake Triggered: {out['emergency_brake']} (Intensity: {out['brake_intensity']})")
-    print(f"    - Steering Guidance: {out['steering_guidance']} (Evasive maneuver)")
+    print(f"    - Steering Guidance: {out['steering_guidance']}")
     print(f"    - Time to Collision (TTC): {out['ttc_seconds']}s")
-    print("=" * 70 + "\n")
+    print("=" * 75 + "\n")
 
 
 if __name__ == "__main__":
-    train_model(epochs=40, batch_size=256, lr=0.006)
+    train_model(epochs=45, batch_size=256, lr=0.006)

@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import { BLOCKERS, PHYSICS } from "./constants";
+import { BLOCKERS, LOOP, PHYSICS } from "./constants";
 
 export type CollisionRisk = "SAFE" | "CAUTION" | "CRITICAL";
 
@@ -45,7 +45,7 @@ export const useAdasStore = create<AdasState>()((set) => ({
   setAdasResult: (res) => set((state) => ({ ...state, ...res })),
 }));
 
-// Raycast distance calculation against 3D spherical / cylindrical blockers
+// Map-Aware Raycast distance calculation against obstacles and pit boundaries
 function castRay(
   originX: number,
   originZ: number,
@@ -57,21 +57,18 @@ function castRay(
 
   let minDist = maxDist;
 
+  // 1. Check genuine obstacle bodies (stockpiles, boulders, machinery)
   for (const [bx, bz, br] of BLOCKERS) {
-    // Vector from ray origin to obstacle center
     const ox = bx - originX;
     const oz = bz - originZ;
 
-    // Project obstacle vector onto ray direction
     const proj = ox * dx + oz * dz;
-    if (proj <= 0) continue; // Obstacle is behind ray
+    if (proj <= 0) continue; // Behind ray
 
-    // Closest approach distance squared from ray line to obstacle center
     const perpSq = ox * ox + oz * oz - proj * proj;
-    const effRadius = br + 1.2; // Add vehicle safety half-width
+    const effRadius = br + 1.2;
 
     if (perpSq < effRadius * effRadius) {
-      // Ray intersects obstacle cylinder
       const hitDist = proj - Math.sqrt(Math.max(0, effRadius * effRadius - perpSq));
       if (hitDist > 0 && hitDist < minDist) {
         minDist = hitDist;
@@ -79,7 +76,37 @@ function castRay(
     }
   }
 
-  // Haul road outer boundary check
+  // 2. Road Berm boundary check
+  // Straight road left/right berms at x = -9.6 and +9.6
+  // Check intersection only if ray points towards the side berms
+  const ROAD_HALF_WIDTH = 9.4;
+  if (Math.abs(originX) <= ROAD_HALF_WIDTH + 1.5) {
+    // If ray points towards left berm (dx < -0.15)
+    if (dx < -0.15) {
+      const distToLeft = (-ROAD_HALF_WIDTH - originX) / dx;
+      if (distToLeft > 0 && distToLeft < minDist) {
+        minDist = distToLeft;
+      }
+    }
+    // If ray points towards right berm (dx > 0.15)
+    else if (dx > 0.15) {
+      const distToRight = (ROAD_HALF_WIDTH - originX) / dx;
+      if (distToRight > 0 && distToRight < minDist) {
+        minDist = distToRight;
+      }
+    }
+  }
+
+  // 3. Turning loop boundary check around (LOOP.x, LOOP.z)
+  const loopDist = Math.hypot(originX - LOOP.x, originZ - LOOP.z);
+  if (loopDist > 15 && loopDist < LOOP.radius + 15) {
+    const outerLoopR = LOOP.radius + LOOP.width / 2;
+    if (loopDist > outerLoopR - 4 && minDist > 15) {
+      minDist = Math.min(minDist, Math.max(2.5, outerLoopR - loopDist));
+    }
+  }
+
+  // 4. Pit outer mountain rim check
   const arenaDist = Math.hypot(originX, originZ);
   const boundaryClearance = PHYSICS.arenaRadius - arenaDist;
   if (boundaryClearance > 0 && boundaryClearance < minDist) {
@@ -170,7 +197,8 @@ class ADASWebSocketClient {
     const rRear = castRay(x, z, yaw + 180 * DEG);
 
     const speedKmh = Math.abs(speed) * PHYSICS.kphPerUnit;
-    const lateralOffset = Math.round((Math.hypot(x, z) - 30) * 10) / 10;
+    // Lateral offset relative to straight haul road center (x = 0)
+    const lateralOffset = Math.round(x * 10) / 10;
 
     const rays = {
       farLeft: rFarLeft,
@@ -198,28 +226,28 @@ class ADASWebSocketClient {
       };
       this.ws.send(JSON.stringify(payload));
     } else {
-      // Local fallback calculation when Python server is not yet launched
-      const minFwd = Math.min(rFarLeft, rLeft, rCenter, rRight, rFarRight);
+      // Local fallback calculation aligned with map geometry
+      const minFwd = Math.min(rCenter, Math.min(rLeft, rRight) * 1.05);
       const speedMs = speedKmh / 3.6;
-      const dSafe = speedMs * 0.3 + (speedMs * speedMs) / (2 * 3.2) + 3.0;
+      const dSafe = speedMs * 0.25 + (speedMs * speedMs) / (2 * 3.2) + 2.5;
       const ttc = speedMs > 0.5 ? Math.round((minFwd / speedMs) * 10) / 10 : 99;
 
       let risk: CollisionRisk = "SAFE";
       let eBrake = false;
-      if (minFwd <= dSafe || (minFwd < 7.5 && speedKmh > 3.0)) {
+      if (minFwd <= dSafe || (minFwd < 6.5 && speedKmh > 2.0)) {
         risk = "CRITICAL";
         eBrake = true;
-      } else if (minFwd <= dSafe * 2.2 + 6.0) {
+      } else if (minFwd <= (dSafe * 2.0 + 8.0) && minFwd < 40.0) {
         risk = "CAUTION";
       }
 
       const steerDiff = (rRight - rLeft) / Math.max(rRight + rLeft, 1);
-      const steerGuide = Math.max(-1, Math.min(1, steerDiff * 1.5));
+      const steerGuide = Math.max(-1, Math.min(1, steerDiff * 1.8));
 
       useAdasStore.getState().setAdasResult({
         collisionRisk: risk,
         emergencyBrake: eBrake,
-        brakeIntensity: eBrake ? 1.0 : (risk === "CAUTION" ? 0.3 : 0),
+        brakeIntensity: eBrake ? 1.0 : (risk === "CAUTION" ? 0.35 : 0),
         steeringGuidance: Math.round(steerGuide * 100) / 100,
         ttcSeconds: ttc,
         closestObstacleM: minFwd,
