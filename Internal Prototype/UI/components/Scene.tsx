@@ -7,6 +7,9 @@ import { Controls } from "./Controls";
 import { CameraRig } from "./CameraRig";
 import { Terrain } from "./Terrain";
 import { useSim } from "@/lib/simStore";
+import { silenceThreeClockWarning } from "@/lib/threeWarnings";
+
+silenceThreeClockWarning();
 
 function FogEnvironment() {
   const fogMode = useSim((s) => s.fogMode);
@@ -29,7 +32,7 @@ function FogEnvironment() {
 export function Scene() {
   return (
     <Canvas
-      shadows
+      shadows="percentage"
       dpr={[1, 1.5]}
       camera={{ fov: 55, near: 0.5, far: 500, position: [0, 6, 8] }}
       gl={{

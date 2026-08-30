@@ -1,12 +1,13 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { BLOCKERS, DUMPER, PHYSICS, clamp, damp } from "@/lib/constants";
 import { isKeyDown } from "@/lib/keys";
 import { useSensor } from "@/lib/virtualSensor";
 import { useSim } from "@/lib/simStore";
 import { rigParts } from "@/lib/rig";
+import { adasClient, useAdasStore } from "@/lib/mlClient";
 
 export function Controls() {
   const prevSpeed = useRef(0);
@@ -16,12 +17,20 @@ export function Controls() {
   const spinAngle = useRef(0);
   const joltVis = useRef(0);
 
+  useEffect(() => {
+    adasClient.init();
+  }, []);
+
   useFrame((state, rawDt) => {
     const dt = Math.min(rawDt, 0.05);
     useSensor.getState().tick(dt);
 
     const sim = useSim.getState();
     let { x, z, yaw, speed, steer, boost } = sim;
+
+    // ADAS TinyML Perception & Telemetry update
+    adasClient.update(x, z, yaw, speed, steer);
+    const adas = useAdasStore.getState();
 
     const w = isKeyDown("KeyW");
     const s = isKeyDown("KeyS");
@@ -36,7 +45,13 @@ export function Controls() {
     } else if (w) keyThrottle = 1;
     else if (s) keyThrottle = -1;
 
-    const throttle = keyThrottle;
+    let throttle = keyThrottle;
+
+    // Autonomous Emergency Braking (AEB) intervention
+    if (adas.emergencyBrake && speed > 0.05) {
+      throttle = 0; // Cut throttle
+    }
+
     steer = clamp((a ? 1 : 0) - (d ? 1 : 0), -1, 1);
 
     const maxSpeed = boost
@@ -46,7 +61,10 @@ export function Controls() {
         : PHYSICS.reverseMaxSpeed;
     const target = throttle * maxSpeed;
 
-    if (Math.abs(throttle) > PHYSICS.throttleDeadzone) {
+    if (adas.emergencyBrake && speed > 0.05) {
+      // High-power emergency brake deceleration
+      speed = Math.max(0, speed - PHYSICS.brake * 3.2 * dt);
+    } else if (Math.abs(throttle) > PHYSICS.throttleDeadzone) {
       if (target > speed) {
         speed = Math.min(target, speed + PHYSICS.accel * dt);
       } else {

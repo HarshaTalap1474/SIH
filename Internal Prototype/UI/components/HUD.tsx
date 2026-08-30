@@ -2,6 +2,7 @@
 
 import { useSim } from "@/lib/simStore";
 import { useSensor } from "@/lib/virtualSensor";
+import { useAdasStore } from "@/lib/mlClient";
 
 export function HUD() {
   const speedKmh = useSim((s) => s.speedKmh);
@@ -93,6 +94,9 @@ export function HUD() {
         </div>
       </div>
 
+      {/* TinyML ADAS Collision Avoidance & Path Guidance Card */}
+      <AdasCard />
+
       {/* Speedometer & Gear Display Card */}
       <div className="pointer-events-auto flex flex-col gap-2">
         <div className="rounded-xl border border-white/10 bg-neutral-950/85 px-4 py-3 shadow-2xl backdrop-blur-md">
@@ -170,6 +174,150 @@ export function HUD() {
             💡 Lights (H)
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function AdasCard() {
+  const connected = useAdasStore((s) => s.connected);
+  const risk = useAdasStore((s) => s.collisionRisk);
+  const emergencyBrake = useAdasStore((s) => s.emergencyBrake);
+  const closestObstacleM = useAdasStore((s) => s.closestObstacleM);
+  const ttcSeconds = useAdasStore((s) => s.ttcSeconds);
+  const steeringGuidance = useAdasStore((s) => s.steeringGuidance);
+  const latencyMs = useAdasStore((s) => s.latencyMs);
+  const rays = useAdasStore((s) => s.rays);
+
+  const isCritical = risk === "CRITICAL" || emergencyBrake;
+  const isCaution = risk === "CAUTION" && !isCritical;
+
+  let steerText = "▲ PATH CLEAR";
+  let steerColor = "text-emerald-400";
+  if (steeringGuidance < -0.15) {
+    steerText = `◄ STEER LEFT (${Math.round(Math.abs(steeringGuidance) * 100)}%)`;
+    steerColor = "text-amber-400";
+  } else if (steeringGuidance > 0.15) {
+    steerText = `STEER RIGHT ► (${Math.round(steeringGuidance * 100)}%)`;
+    steerColor = "text-amber-400";
+  }
+
+  return (
+    <div
+      className={`rounded-xl border px-4 py-3 font-mono text-[10px] leading-4 shadow-2xl backdrop-blur-md transition-all ${
+        isCritical
+          ? "border-red-500 bg-red-950/80 ring-2 ring-red-500/50 animate-pulse"
+          : isCaution
+          ? "border-amber-500/60 bg-amber-950/40 ring-1 ring-amber-500/30"
+          : "border-white/10 bg-neutral-950/85"
+      }`}
+    >
+      {/* Card Header & Server Status */}
+      <div className="mb-2 flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
+            TinyML ADAS · Radar
+          </span>
+        </div>
+        <span
+          className={`flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider ${
+            connected ? "text-emerald-400" : "text-neutral-400"
+          }`}
+        >
+          <span
+            className={`inline-block h-1.5 w-1.5 rounded-full ${
+              connected ? "bg-emerald-400 shadow-[0_0_8px_#34d399]" : "bg-neutral-500"
+            }`}
+          />
+          {connected ? "AI Online (8765)" : "Local Mode"}
+        </span>
+      </div>
+
+      {/* Primary Collision Warning Banner */}
+      <div
+        className={`mb-2 flex items-center justify-between rounded-lg px-2.5 py-1.5 text-[10px] font-extrabold uppercase tracking-wider ${
+          isCritical
+            ? "bg-red-600 text-white shadow-[0_0_12px_rgba(239,68,68,0.5)]"
+            : isCaution
+            ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+            : "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20"
+        }`}
+      >
+        <span>
+          {isCritical
+            ? "🛑 AUTO EMERGENCY BRAKE"
+            : isCaution
+            ? "⚠ PROXIMITY CAUTION"
+            : "✔ CLEAR PATH"}
+        </span>
+        <span className="text-[9px] font-normal lowercase opacity-80">
+          {latencyMs > 0 ? `${(latencyMs * 1000).toFixed(0)}µs` : "<1ms"}
+        </span>
+      </div>
+
+      {/* Real-Time Obstacle Metrics Grid */}
+      <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-neutral-300">
+        <div>
+          Obstacle Dist:{" "}
+          <strong
+            className={`text-[11px] ${
+              closestObstacleM < 15
+                ? "text-red-400 font-extrabold"
+                : closestObstacleM < 30
+                ? "text-amber-400"
+                : "text-white"
+            }`}
+          >
+            {closestObstacleM >= 80 ? ">80m" : `${closestObstacleM.toFixed(1)}m`}
+          </strong>
+        </div>
+        <div>
+          TTC (Time-to-Hit):{" "}
+          <strong
+            className={`text-[11px] ${
+              ttcSeconds < 2.0
+                ? "text-red-400 font-extrabold"
+                : ttcSeconds < 4.0
+                ? "text-amber-400"
+                : "text-white"
+            }`}
+          >
+            {ttcSeconds > 50 ? "--" : `${ttcSeconds.toFixed(1)}s`}
+          </strong>
+        </div>
+      </div>
+
+      {/* Path Guidance Evasive Steering Assist */}
+      <div className="mt-2 border-t border-white/10 pt-1.5 flex items-center justify-between text-neutral-300">
+        <span className="text-[9px] uppercase tracking-wider text-neutral-400">
+          Path Guidance:
+        </span>
+        <span className={`font-bold tracking-wide ${steerColor}`}>
+          {steerText}
+        </span>
+      </div>
+
+      {/* 5-Ray Mini Proximity Visualizer */}
+      <div className="mt-2 flex items-center justify-between gap-1 pt-1 text-[8px] text-neutral-400">
+        {[
+          { label: "FL", val: rays.farLeft },
+          { label: "L", val: rays.left },
+          { label: "C", val: rays.center },
+          { label: "R", val: rays.right },
+          { label: "FR", val: rays.farRight },
+        ].map((r) => {
+          const pct = Math.min(100, Math.max(10, (r.val / 50) * 100));
+          const col =
+            r.val < 12 ? "bg-red-500" : r.val < 25 ? "bg-amber-400" : "bg-emerald-500";
+          return (
+            <div key={r.label} className="flex-1 flex flex-col items-center gap-0.5">
+              <div className="h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
+                <div className={`h-full ${col}`} style={{ width: `${pct}%` }} />
+              </div>
+              <span className="text-[7px] font-mono">{r.label}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
