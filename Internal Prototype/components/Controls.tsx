@@ -92,7 +92,8 @@ export function Controls() {
       }
     }
 
-    useSim.setState({ x, z, yaw, speed, steer, boost });
+    // Call setFrame to update speedKmh, gear, and state synchronously
+    useSim.getState().setFrame({ x, z, yaw, speed, steer, boost });
 
     if (rigParts.rig) {
       rigParts.rig.position.set(x, 0, z);

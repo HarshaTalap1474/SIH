@@ -11,7 +11,6 @@ export function TiltPad() {
   const roll = useSensor((s) => s.roll);
   const pitch = useSensor((s) => s.pitch);
   const yawHeading = useSensor((s) => s.yawHeading);
-  const roadAnomaly = useSensor((s) => s.roadAnomaly);
 
   const dragging = useRef(false);
   const moved = useRef(false);
@@ -19,6 +18,7 @@ export function TiltPad() {
   const cooldownUntil = useRef(0);
 
   const [cursor, setCursor] = useState({ x: 0, y: 0 });
+  const [collapsed, setCollapsed] = useState(true);
 
   const onPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     dragging.current = true;
@@ -58,54 +58,52 @@ export function TiltPad() {
   const py = (cursor.y / PAD_RADIUS) * (PAD_RADIUS - 20);
 
   return (
-    <div className="absolute bottom-4 right-4 z-10 flex select-none flex-col items-center gap-2">
-      <div className="rounded-lg border border-white/10 bg-black/50 px-3 py-1.5 text-center text-[10px] leading-4 text-neutral-300 backdrop-blur-sm">
-        <div className="font-semibold uppercase tracking-wider text-amber-400">
-          Virtual Tilt Pad
-        </div>
-        <div className="text-neutral-400">
-          MPU6050 stand-in · drag to orbit the camera · tap = pothole
-        </div>
-      </div>
-
-      <div
-        className="relative touch-none cursor-pointer rounded-full border border-white/20 bg-gradient-to-br from-slate-800/70 to-slate-950/80 shadow-2xl backdrop-blur-sm"
-        style={{ width: PAD_SIZE, height: PAD_SIZE }}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={stop}
-        onPointerCancel={stop}
-        onPointerLeave={stop}
+    <div className="fixed bottom-24 right-4 z-30 flex select-none flex-col items-end gap-2">
+      {/* Toggle button */}
+      <button
+        onClick={() => setCollapsed(!collapsed)}
+        className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-neutral-950/80 px-2.5 py-1 text-[11px] font-semibold text-neutral-300 shadow-xl backdrop-blur-md transition-all hover:bg-neutral-800"
       >
-        <div className="absolute inset-[26px] rounded-full border border-white/10" />
-        <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-white/10" />
-        <div className="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-white/10" />
+        <span>🕹</span>
+        <span>{collapsed ? "Open Tilt Pad" : "Hide Tilt Pad"}</span>
+      </button>
 
-        <div
-          className="absolute left-1/2 top-1/2 rounded-full bg-amber-400 shadow-lg"
-          style={{
-            width: 18,
-            height: 18,
-            transform: `translate(calc(-50% + ${px}px), calc(-50% + ${py}px))`,
-          }}
-        />
-      </div>
+      {!collapsed && (
+        <div className="flex flex-col items-center gap-2 rounded-2xl border border-white/10 bg-neutral-950/90 p-3 shadow-2xl backdrop-blur-md">
+          <div className="text-center text-[10px] leading-tight text-neutral-400">
+            <span className="font-semibold text-amber-400">Virtual MPU-6050 Pad</span>
+            <br />
+            Drag to orbit · Tap = pothole jolt
+          </div>
 
-      <div className="flex gap-3 font-mono text-[11px] tabular-nums text-neutral-300">
-        <span>
-          ROLL <span className="text-amber-400">{Math.round(roll)}°</span>
-        </span>
-        <span>
-          PITCH <span className="text-amber-400">{Math.round(pitch)}°</span>
-        </span>
-        <span>
-          YAW <span className="text-amber-400">{Math.round(yawHeading)}°</span>
-        </span>
-      </div>
+          <div
+            className="relative touch-none cursor-pointer rounded-full border border-amber-500/30 bg-gradient-to-br from-neutral-900 to-neutral-950 shadow-inner shadow-black"
+            style={{ width: PAD_SIZE, height: PAD_SIZE }}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={stop}
+            onPointerCancel={stop}
+            onPointerLeave={stop}
+          >
+            <div className="absolute inset-[26px] rounded-full border border-white/5" />
+            <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-white/10" />
+            <div className="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-white/10" />
 
-      {roadAnomaly && (
-        <div className="animate-pulse rounded-md border border-orange-400/40 bg-orange-500/20 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-orange-300">
-          Road anomaly detected
+            <div
+              className="absolute left-1/2 top-1/2 rounded-full bg-amber-400 shadow-md shadow-amber-400/50"
+              style={{
+                width: 18,
+                height: 18,
+                transform: `translate(calc(-50% + ${px}px), calc(-50% + ${py}px))`,
+              }}
+            />
+          </div>
+
+          <div className="flex gap-2 font-mono text-[10px] tabular-nums text-neutral-300">
+            <span>R: <strong className="text-amber-400">{Math.round(roll)}°</strong></span>
+            <span>P: <strong className="text-amber-400">{Math.round(pitch)}°</strong></span>
+            <span>Y: <strong className="text-amber-400">{Math.round(yawHeading)}°</strong></span>
+          </div>
         </div>
       )}
     </div>

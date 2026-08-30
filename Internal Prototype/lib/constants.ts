@@ -48,55 +48,58 @@ export const SENSOR = {
 
 export const CAMERA = {
   chaseDist: 11.5,
-  chaseHeight:11 ,
-  orbitHeight: 10,
+  chaseHeight: 10,
+  orbitHeight: 9,
   idleAngleDeg: -90,
-  topHeight: 38,
+  topHeight: 42,
   topOffsetZ: 8,
-  lookHeight: 2.3,
-  dampLambda: 2.7,
+  lookHeight: 2.2,
+  dampLambda: 3.2,
 } as const;
 
 export const SCENE = {
-  background: "#d8ceb6",
-  fogColor: "#d8ceb6",
-  fogNear: 70,
-  fogFar: 240,
-  groundColor: "#413b32",
-  roadColor: "#7d705a",
-  roadLineColor: "#c9bda0",
-  boundaryColor: "#8a7a5c",
-  rockColor: "#8f8a80",
-  coneColor: "#e8562d",
-  moundColor: "#6f624c",
-  patchColor: "#4a4234",
-  pondColor: "#2e4142",
-  plateColor: "#6b5d42",
+  background: "#1c1917",
+  fogColor: "#292524",
+  fogNear: 25,
+  fogFar: 140,
+  groundColor: "#43281c",
+  groundDark: "#2c1810",
+  roadColor: "#332c27",
+  roadBermColor: "#573422",
+  roadLineColor: "#e69500",
+  boundaryColor: "#78350f",
+  rockColor: "#44403c",
+  rockHighGrade: "#6b2118",
+  coneColor: "#ea580c",
+  moundColor: "#582f1d",
+  patchColor: "#38231a",
+  pondColor: "#132a29",
+  plateColor: "#453224",
   cameraStart: { x: 0, y: 6, z: 8 },
 } as const;
 
-export const LOOP = { x: 0, z: -80, radius: 26, width: 7 } as const;
+export const LOOP = { x: 0, z: -80, radius: 26, width: 9 } as const;
 
 export const PIT_BENCHES = [
-  { r: 128, h: 8, color: "#473f33" },
-  { r: 144, h: 12, color: "#4d4436" },
-  { r: 160, h: 16, color: "#52493a" },
-  { r: 176, h: 20, color: "#574e3e" },
+  { r: 125, h: 6, color: "#3d2216", topColor: "#4e2b1c" },
+  { r: 140, h: 12, color: "#361e13", topColor: "#452618" },
+  { r: 156, h: 18, color: "#2f1a10", topColor: "#3d2216" },
+  { r: 172, h: 24, color: "#29170e", topColor: "#361e13" },
 ] as const;
 
 export const ROCK_SPOTS: ReadonlyArray<readonly [number, number, number]> = [
-  [-24, -98, 1.6],
-  [24, -96, 1.9],
-  [-17, -64, 1.3],
-  [58, -92, 2.1],
-  [45, 10, 1.5],
-  [-40, 42, 2.2],
-  [-98, -58, 2.6],
-  [-100, 22, 2.3],
-  [96, 32, 2.4],
-  [98, -42, 2.5],
-  [-62, 82, 1.8],
-  [88, -86, 1.7],
+  [-24, -98, 1.8],
+  [24, -96, 2.0],
+  [-17, -64, 1.4],
+  [58, -92, 2.3],
+  [45, 10, 1.7],
+  [-40, 42, 2.4],
+  [-98, -58, 2.8],
+  [-100, 22, 2.5],
+  [96, 32, 2.6],
+  [98, -42, 2.7],
+  [-62, 82, 1.9],
+  [88, -86, 1.8],
 ];
 
 export const CONE_SPOTS: ReadonlyArray<readonly [number, number]> = [
@@ -115,11 +118,11 @@ export const CONE_SPOTS: ReadonlyArray<readonly [number, number]> = [
 ];
 
 export const STOCKPILES: ReadonlyArray<readonly [number, number, number, number]> = [
-  [78, -78, 16, 10],
-  [-80, -70, 14, 9],
-  [72, 64, 18, 11],
-  [-70, 72, 13, 8],
-  [-96, -10, 15, 9],
+  [78, -78, 16, 11],
+  [-80, -70, 15, 10],
+  [72, 64, 19, 12],
+  [-70, 72, 14, 9],
+  [-96, -10, 16, 10],
 ];
 
 export const PATCHES: ReadonlyArray<readonly [number, number, number, number]> = [
@@ -153,12 +156,12 @@ export const DUMPER = {
   bin: { x: 0.0, y: 2.55, z: 1.3, w: 4.7, h: 1.7, d: 3.7 },
   binWall: { h: 3.0 },
   colors: {
-    body: "#f5a800",
-    bodyDark: "#d98c00",
-    chassis: "#23211d",
-    tire: "#0f1013",
-    rim: "#3a3d42",
-    window: "#1f2b36",
-    bin: "#f7b733",
+    body: "#e5a100",
+    bodyDark: "#b87c00",
+    chassis: "#1c1917",
+    tire: "#0c0a09",
+    rim: "#57534e",
+    window: "#1e293b",
+    bin: "#d97706",
   },
 } as const;

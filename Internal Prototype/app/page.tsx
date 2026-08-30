@@ -12,11 +12,13 @@ export default function Page() {
     initKeys({
       onC: () => useSim.getState().toggleCam(),
       onR: () => useSim.getState().resetSim(),
+      onH: () => useSim.getState().toggleHeadlights(),
+      onF: () => useSim.getState().toggleFog(),
     });
   }, []);
 
   return (
-    <main className="fixed inset-0 overflow-hidden">
+    <main className="fixed inset-0 overflow-hidden bg-neutral-950 font-sans text-white select-none">
       <Scene />
       <HUD />
       <TiltPad />

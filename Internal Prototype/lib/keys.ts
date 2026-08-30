@@ -1,32 +1,51 @@
-const pressed = new Set<string>()
+const pressed = new Set<string>();
 
 interface KeyHandlers {
-  onC?: () => void
-  onR?: () => void
+  onC?: () => void;
+  onR?: () => void;
+  onH?: () => void;
+  onF?: () => void;
 }
 
-let handlers: KeyHandlers = {}
-let initialized = false
+let handlers: KeyHandlers = {};
+let initialized = false;
 
 export function initKeys(nextHandlers: KeyHandlers) {
-  handlers = nextHandlers
-  if (initialized) return
-  initialized = true
+  handlers = nextHandlers;
+  if (initialized) return;
+  initialized = true;
 
   const down = (e: KeyboardEvent) => {
-    if (e.repeat) return
-    pressed.add(e.code)
-    if (e.code === "KeyC") handlers.onC?.()
-    if (e.code === "KeyR") handlers.onR?.()
-  }
-  const up = (e: KeyboardEvent) => pressed.delete(e.code)
-  const clear = () => pressed.clear()
+    // Ignore key presses if user is focused on an input element
+    if (
+      e.target instanceof HTMLInputElement ||
+      e.target instanceof HTMLTextAreaElement
+    ) {
+      return;
+    }
 
-  window.addEventListener("keydown", down)
-  window.addEventListener("keyup", up)
-  window.addEventListener("blur", clear)
+    if (e.repeat) return;
+    pressed.add(e.code);
+
+    if (e.code === "KeyC") handlers.onC?.();
+    if (e.code === "KeyR") handlers.onR?.();
+    if (e.code === "KeyH") handlers.onH?.();
+    if (e.code === "KeyF") handlers.onF?.();
+  };
+
+  const up = (e: KeyboardEvent) => pressed.delete(e.code);
+  const clear = () => pressed.clear();
+
+  window.addEventListener("keydown", down);
+  window.addEventListener("keyup", up);
+  window.addEventListener("blur", clear);
 }
 
 export function isKeyDown(code: string) {
-  return pressed.has(code)
+  // Support both WASD and Arrow keys
+  if (code === "KeyW") return pressed.has("KeyW") || pressed.has("ArrowUp");
+  if (code === "KeyS") return pressed.has("KeyS") || pressed.has("ArrowDown");
+  if (code === "KeyA") return pressed.has("KeyA") || pressed.has("ArrowLeft");
+  if (code === "KeyD") return pressed.has("KeyD") || pressed.has("ArrowRight");
+  return pressed.has(code);
 }

@@ -1,7 +1,9 @@
 import { create } from "zustand";
 import { PHYSICS, START_POS } from "./constants";
 
-export type CamMode = "chase" | "top";
+export type CamMode = "chase" | "top" | "cockpit";
+export type FogMode = "heavy" | "medium" | "clear";
+export type GearMode = "D" | "R" | "N" | "B";
 
 interface SimStore {
   x: number;
@@ -12,6 +14,9 @@ interface SimStore {
   boost: boolean;
   camMode: CamMode;
   speedKmh: number;
+  gear: GearMode;
+  headlights: boolean;
+  fogMode: FogMode;
   setFrame: (s: {
     x: number;
     z: number;
@@ -21,6 +26,9 @@ interface SimStore {
     boost: boolean;
   }) => void;
   toggleCam: () => void;
+  setCamMode: (mode: CamMode) => void;
+  toggleHeadlights: () => void;
+  toggleFog: () => void;
   resetSim: () => void;
 }
 
@@ -33,7 +41,20 @@ export const useSim = create<SimStore>()((set) => ({
   boost: false,
   camMode: "chase",
   speedKmh: 0,
-  setFrame: ({ x, z, yaw, speed, steer, boost }) =>
+  gear: "N",
+  headlights: true,
+  fogMode: "heavy",
+
+  setFrame: ({ x, z, yaw, speed, steer, boost }) => {
+    const speedKmh = Math.round(Math.abs(speed) * PHYSICS.kphPerUnit);
+    const gear: GearMode = boost
+      ? "B"
+      : speed > 0.15
+      ? "D"
+      : speed < -0.15
+      ? "R"
+      : "N";
+
     set({
       x,
       z,
@@ -41,10 +62,29 @@ export const useSim = create<SimStore>()((set) => ({
       speed,
       steer,
       boost,
-      speedKmh: Math.round(Math.abs(speed) * PHYSICS.kphPerUnit),
-    }),
+      speedKmh,
+      gear,
+    });
+  },
+
   toggleCam: () =>
-    set((s) => ({ camMode: s.camMode === "chase" ? "top" : "chase" })),
+    set((s) => {
+      const modes: CamMode[] = ["chase", "cockpit", "top"];
+      const nextIdx = (modes.indexOf(s.camMode) + 1) % modes.length;
+      return { camMode: modes[nextIdx] };
+    }),
+
+  setCamMode: (camMode) => set({ camMode }),
+
+  toggleHeadlights: () => set((s) => ({ headlights: !s.headlights })),
+
+  toggleFog: () =>
+    set((s) => {
+      const modes: FogMode[] = ["heavy", "medium", "clear"];
+      const nextIdx = (modes.indexOf(s.fogMode) + 1) % modes.length;
+      return { fogMode: modes[nextIdx] };
+    }),
+
   resetSim: () =>
     set({
       x: START_POS.x,
@@ -54,5 +94,6 @@ export const useSim = create<SimStore>()((set) => ({
       steer: 0,
       boost: false,
       speedKmh: 0,
+      gear: "N",
     }),
 }));
