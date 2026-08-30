@@ -18,7 +18,7 @@ export function TiltPad() {
   const cooldownUntil = useRef(0);
 
   const [cursor, setCursor] = useState({ x: 0, y: 0 });
-  const [collapsed, setCollapsed] = useState(true);
+  const [collapsed, setCollapsed] = useState(false);
 
   const onPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     dragging.current = true;
@@ -58,22 +58,21 @@ export function TiltPad() {
   const py = (cursor.y / PAD_RADIUS) * (PAD_RADIUS - 20);
 
   return (
-    <div className="fixed bottom-24 right-4 z-30 flex select-none flex-col items-end gap-2">
-      {/* Toggle button */}
+    <div className="fixed bottom-4 right-4 z-30 flex select-none flex-col items-end gap-1.5">
+      {/* Small toggle icon */}
       <button
         onClick={() => setCollapsed(!collapsed)}
-        className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-neutral-950/80 px-2.5 py-1 text-[11px] font-semibold text-neutral-300 shadow-xl backdrop-blur-md transition-all hover:bg-neutral-800"
+        className="cursor-pointer rounded-lg border border-white/10 bg-neutral-950/80 px-2 py-0.5 text-[10px] font-medium text-neutral-400 shadow-md backdrop-blur-sm transition-colors hover:bg-neutral-800 hover:text-white"
       >
-        <span>🕹</span>
-        <span>{collapsed ? "Open Tilt Pad" : "Hide Tilt Pad"}</span>
+        {collapsed ? "🕹 Show Tilt Pad" : "Hide"}
       </button>
 
       {!collapsed && (
-        <div className="flex flex-col items-center gap-2 rounded-2xl border border-white/10 bg-neutral-950/90 p-3 shadow-2xl backdrop-blur-md">
+        <div className="flex flex-col items-center gap-1.5 rounded-2xl border border-white/10 bg-neutral-950/85 p-3 shadow-2xl backdrop-blur-md">
           <div className="text-center text-[10px] leading-tight text-neutral-400">
-            <span className="font-semibold text-amber-400">Virtual MPU-6050 Pad</span>
+            <span className="font-bold text-amber-400">Virtual MPU-6050 Pad</span>
             <br />
-            Drag to orbit · Tap = pothole jolt
+            Drag to orbit · Tap = pothole
           </div>
 
           <div
