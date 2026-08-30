@@ -2,7 +2,6 @@
 
 import * as THREE from "three";
 import {
-  CONE_SPOTS,
   LOOP,
   PATCHES,
   PIT_BENCHES,
@@ -90,24 +89,6 @@ function Rock({ x, z, s, i }: { x: number; z: number; s: number; i: number }) {
   );
 }
 
-function Cone({ x, z }: { x: number; z: number }) {
-  return (
-    <group position={[x, 0, z]}>
-      <mesh position={[0, 0.05, 0]} castShadow receiveShadow>
-        <boxGeometry args={[0.7, 0.1, 0.7]} />
-        <meshStandardMaterial color="#1c1917" roughness={0.9} />
-      </mesh>
-      <mesh position={[0, 0.55, 0]} castShadow>
-        <coneGeometry args={[0.3, 0.95, 12]} />
-        <meshStandardMaterial color={SCENE.coneColor} roughness={0.7} />
-      </mesh>
-      <mesh position={[0, 0.48, 0]}>
-        <cylinderGeometry args={[0.21, 0.23, 0.18, 12]} />
-        <meshStandardMaterial color="#f8fafc" roughness={0.4} emissive="#f8fafc" emissiveIntensity={0.2} />
-      </mesh>
-    </group>
-  );
-}
 
 function Mound({ x, z, r, h, isHighGrade = false }: { x: number; z: number; r: number; h: number; isHighGrade?: boolean }) {
   return (
@@ -352,10 +333,7 @@ export function Terrain() {
         <Rock key={`r${i}`} x={x} z={z} s={s} i={i} />
       ))}
 
-      {/* High-Visibility Safety Traffic Cones */}
-      {CONE_SPOTS.map(([x, z], i) => (
-        <Cone key={`c${i}`} x={x} z={z} />
-      ))}
+
 
       {/* Stepped Terraced Pit Benches (Bailadila Open-Cast Mine Walls) */}
       {PIT_BENCHES.map((b, i) => (

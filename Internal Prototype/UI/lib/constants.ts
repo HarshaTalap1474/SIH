@@ -102,21 +102,6 @@ export const ROCK_SPOTS: ReadonlyArray<readonly [number, number, number]> = [
   [88, -86, 1.8],
 ];
 
-export const CONE_SPOTS: ReadonlyArray<readonly [number, number]> = [
-  [0, -2],
-  [2.6, -12],
-  [-2.8, -24],
-  [1.4, -36],
-  [-1.6, -48],
-  [2.2, -58],
-  [0, 6],
-  [-30, -90],
-  [30, -92],
-  [-34, -66],
-  [20, -78],
-  [38, -56],
-];
-
 export const STOCKPILES: ReadonlyArray<readonly [number, number, number, number]> = [
   [78, -78, 16, 11],
   [-80, -70, 15, 10],
@@ -139,7 +124,6 @@ export const BLOCKERS: ReadonlyArray<readonly [number, number, number]> = [
   [52, -62, 12.5],
   [-55, 35, 11.5],
   ...ROCK_SPOTS.map(([x, z, s]) => [x, z, s * 1.5] as const),
-  ...CONE_SPOTS.map(([x, z]) => [x, z, 0.5] as const),
 ];
 
 export const DUMPER = {
