@@ -1,129 +1,33 @@
-# ==========================================
-# Dependencies
-# ==========================================
+# Node & Next.js
 node_modules/
-**/node_modules/
-.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/sdks
-!.yarn/versions
-
-# ==========================================
-# Production & Build Outputs
-# ==========================================
 .next/
-**/.next/
 out/
-**/out/
 build/
-**/build/
 dist/
-**/dist/
-.turbo/
-**/.turbo/
-.vercel/
-**/.vercel/
-
-# ==========================================
-# TypeScript & Cache
-# ==========================================
-*.tsbuildinfo
 next-env.d.ts
-.eslintcache
-.stylelintcache
-.cache/
-**/.cache/
-.parcel-cache/
-
-# ==========================================
-# Environment Variables & Secrets
-# ==========================================
-.env
-.env*.local
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-*.pem
-*.key
-*.cert
-*.crt
-*.pfx
-*.p12
+*.tsbuildinfo
 session.json
-*.session.json
 
-# ==========================================
-# Logs & Debugging
-# ==========================================
-logs/
-*.log
+# Logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
 .pnpm-debug.log*
 
-# ==========================================
-# Testing & Coverage
-# ==========================================
-coverage/
-**/coverage/
-*.lcov
-.nyc_output
+# Environment
+.env
+.env*.local
 
-# ==========================================
-# Python / Virtual Environments (if applicable)
-# ==========================================
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
 .venv/
 venv/
 env/
-ENV/
-.ipynb_checkpoints
 
-# ==========================================
-# Operating System Files
-# ==========================================
-# Windows
-Thumbs.db
-Thumbs.db:encryptable
-ehthumbs.db
-ehthumbs_vista.db
-Desktop.ini
-$RECYCLE.BIN/
-
-# macOS
+# IDE / OS
 .DS_Store
-.AppleDouble
-.LSOverride
-._*
-.Spotlight-V100
-.Trashes
-
-# Linux
-*~
-.fuse_hidden*
-.directory
-.Trash-*
-
-# ==========================================
-# IDE & Editor Configurations
-# ==========================================
+Thumbs.db
+.vscode/
 .idea/
-*.swp
-*.swo
-*.sublime-workspace
-*.sublime-project
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
