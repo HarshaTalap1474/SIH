@@ -1,6 +1,5 @@
 "use client";
 
-import { useMemo } from "react";
 import * as THREE from "three";
 import {
   CONE_SPOTS,
@@ -13,24 +12,47 @@ import {
   STOCKPILES,
 } from "@/lib/constants";
 
-// Safety berms along the main haul road to prevent falling into the pit and eliminate flat flickering
+// Safety berms along the main haul road to prevent falling into the pit
 function RoadBerms() {
   return (
     <group>
       {/* Left Berm */}
       <mesh position={[-9.6, 0.45, 0]} castShadow receiveShadow>
-        <cylinderGeometry args={[0.5, 1.2, 380, 8]} />
+        <cylinderGeometry args={[0.5, 1.3, 380, 8]} />
         <meshStandardMaterial color={SCENE.roadBermColor} roughness={0.95} />
       </mesh>
       {/* Right Berm */}
       <mesh position={[9.6, 0.45, 0]} castShadow receiveShadow>
-        <cylinderGeometry args={[0.5, 1.2, 380, 8]} />
+        <cylinderGeometry args={[0.5, 1.3, 380, 8]} />
         <meshStandardMaterial color={SCENE.roadBermColor} roughness={0.95} />
       </mesh>
       {/* Loop outer safety berm */}
       <mesh position={[LOOP.x, 0.45, LOOP.z]} rotation={[-Math.PI / 2, 0, 0]} castShadow receiveShadow>
-        <torusGeometry args={[LOOP.radius + LOOP.width / 2 + 0.6, 0.7, 8, 48]} />
+        <torusGeometry args={[LOOP.radius + LOOP.width / 2 + 0.6, 0.75, 8, 48]} />
         <meshStandardMaterial color={SCENE.roadBermColor} roughness={0.95} />
+      </mesh>
+    </group>
+  );
+}
+
+// Mining Road Signs
+function MineSign({ x, z, text, rot = 0 }: { x: number; z: number; text: string; rot?: number }) {
+  return (
+    <group position={[x, 0, z]} rotation={[0, rot, 0]}>
+      {/* Steel Post */}
+      <mesh position={[0, 1.5, 0]} castShadow>
+        <cylinderGeometry args={[0.06, 0.06, 3.0, 8]} />
+        <meshStandardMaterial color="#78716c" roughness={0.5} metalness={0.7} />
+      </mesh>
+      {/* Sign Board */}
+      <mesh position={[0, 2.5, 0.05]} castShadow>
+        <boxGeometry args={[1.6, 0.9, 0.08]} />
+        <meshStandardMaterial color="#f59e0b" roughness={0.4} />
+      </mesh>
+      {/* Sign Border Accent */}
+      <mesh position={[0, 2.5, 0.1]}>
+        <boxGeometry args={[1.45, 0.75, 0.02]} />
+        <meshStandardMaterial color="#09090b" roughness={0.6} />
       </mesh>
     </group>
   );
@@ -71,17 +93,14 @@ function Rock({ x, z, s, i }: { x: number; z: number; s: number; i: number }) {
 function Cone({ x, z }: { x: number; z: number }) {
   return (
     <group position={[x, 0, z]}>
-      {/* Heavy rubber base */}
       <mesh position={[0, 0.05, 0]} castShadow receiveShadow>
         <boxGeometry args={[0.7, 0.1, 0.7]} />
         <meshStandardMaterial color="#1c1917" roughness={0.9} />
       </mesh>
-      {/* Orange body */}
       <mesh position={[0, 0.55, 0]} castShadow>
         <coneGeometry args={[0.3, 0.95, 12]} />
         <meshStandardMaterial color={SCENE.coneColor} roughness={0.7} />
       </mesh>
-      {/* White reflective safety stripe */}
       <mesh position={[0, 0.48, 0]}>
         <cylinderGeometry args={[0.21, 0.23, 0.18, 12]} />
         <meshStandardMaterial color="#f8fafc" roughness={0.4} emissive="#f8fafc" emissiveIntensity={0.2} />
@@ -109,12 +128,10 @@ function Mound({ x, z, r, h, isHighGrade = false }: { x: number; z: number; r: n
 function BenchTerrace({ r, h, color, topColor }: { r: number; h: number; color: string; topColor: string }) {
   return (
     <group position={[0, 0, 0]}>
-      {/* Bench wall */}
       <mesh position={[0, h / 2, 0]} receiveShadow>
         <cylinderGeometry args={[r + 8, r, h, 64, 1, true]} />
         <meshStandardMaterial color={color} roughness={0.95} side={THREE.DoubleSide} />
       </mesh>
-      {/* Bench catch floor */}
       <mesh position={[0, h, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <ringGeometry args={[r, r + 16, 64]} />
         <meshStandardMaterial color={topColor} roughness={1} />
@@ -126,35 +143,27 @@ function BenchTerrace({ r, h, color, topColor }: { r: number; h: number; color: 
 function LightTower({ x, z, rot = 0 }: { x: number; z: number; rot?: number }) {
   return (
     <group position={[x, 0, z]} rotation={[0, rot, 0]}>
-      {/* Concrete pedestal */}
       <mesh position={[0, 0.5, 0]} castShadow receiveShadow>
         <boxGeometry args={[2, 1, 2]} />
         <meshStandardMaterial color="#57534e" roughness={0.9} />
       </mesh>
-      {/* Lattice tower column */}
       <mesh position={[0, 7.5, 0]} castShadow>
         <cylinderGeometry args={[0.3, 0.5, 14, 6]} />
         <meshStandardMaterial color="#78716c" roughness={0.6} metalness={0.5} />
       </mesh>
-      {/* Floodlight bracket */}
       <mesh position={[0, 14.5, 0.4]} castShadow>
         <boxGeometry args={[2.4, 0.8, 0.6]} />
         <meshStandardMaterial color="#292524" roughness={0.5} />
       </mesh>
-      {/* Dual lamps */}
       {[-0.7, 0.7].map((lx, i) => (
         <group key={i} position={[lx, 14.3, 0.7]}>
           <mesh rotation={[0.4, 0, 0]}>
             <boxGeometry args={[0.9, 0.6, 0.3]} />
-            <meshStandardMaterial
-              color="#fef08a"
-              emissive="#fde047"
-              emissiveIntensity={1.8}
-            />
+            <meshStandardMaterial color="#fef08a" emissive="#fde047" emissiveIntensity={1.8} />
           </mesh>
         </group>
       ))}
-      <pointLight position={[0, 14, 1.5]} intensity={15} distance={45} color="#fef08a" />
+      <pointLight position={[0, 14, 1.5]} intensity={16} distance={50} color="#fef08a" />
     </group>
   );
 }
@@ -162,32 +171,26 @@ function LightTower({ x, z, rot = 0 }: { x: number; z: number; rot?: number }) {
 function Loader({ x, z, rot }: { x: number; z: number; rot: number }) {
   return (
     <group position={[x, 0, z]} rotation={[0, rot, 0]}>
-      {/* Chassis & Body */}
       <mesh position={[-0.2, 1.25, 0.2]} castShadow receiveShadow>
         <boxGeometry args={[3.2, 1.6, 4.8]} />
         <meshStandardMaterial color="#d97706" roughness={0.5} metalness={0.2} />
       </mesh>
-      {/* Operator Cabin */}
       <mesh position={[0, 2.45, -1.1]} castShadow>
         <boxGeometry args={[2.3, 1.3, 1.6]} />
         <meshStandardMaterial color="#b45309" roughness={0.5} />
       </mesh>
-      {/* Tinted glass */}
       <mesh position={[0, 2.5, -1.91]}>
         <boxGeometry args={[2.0, 0.9, 0.1]} />
         <meshStandardMaterial color="#0f172a" roughness={0.2} metalness={0.8} />
       </mesh>
-      {/* Loader Arm */}
       <mesh position={[0, 1.8, 2.2]} rotation={[-0.3, 0, 0]} castShadow>
         <boxGeometry args={[2.2, 0.4, 3.2]} />
         <meshStandardMaterial color="#78350f" roughness={0.6} />
       </mesh>
-      {/* Heavy Ore Bucket */}
       <mesh position={[0, 1.1, 3.6]} rotation={[0.1, 0, 0]} castShadow receiveShadow>
         <boxGeometry args={[3.4, 1.4, 1.8]} />
         <meshStandardMaterial color="#292524" roughness={0.85} metalness={0.4} />
       </mesh>
-      {/* Massive Wheels */}
       {[1.65, -1.65].map((wx) =>
         [1.8, -1.8].map((wz, idx) => (
           <mesh key={`${wx}-${idx}`} position={[wx, 1.0, wz]} rotation={[0, 0, Math.PI / 2]} castShadow>
@@ -203,7 +206,6 @@ function Loader({ x, z, rot }: { x: number; z: number; rot: number }) {
 function Excavator({ x, z, rot }: { x: number; z: number; rot: number }) {
   return (
     <group position={[x, 0, z]} rotation={[0, rot, 0]}>
-      {/* Crawler Track Base */}
       <mesh position={[-1.8, 0.65, 0.4]} castShadow receiveShadow>
         <boxGeometry args={[1.1, 1.2, 4.8]} />
         <meshStandardMaterial color="#1c1917" roughness={0.95} />
@@ -216,18 +218,14 @@ function Excavator({ x, z, rot }: { x: number; z: number; rot: number }) {
         <boxGeometry args={[2.6, 0.6, 3.8]} />
         <meshStandardMaterial color="#292524" roughness={0.9} />
       </mesh>
-
-      {/* Rotating Upper House */}
       <mesh position={[0, 2.1, 0.3]} castShadow>
         <boxGeometry args={[3.8, 1.8, 4.0]} />
         <meshStandardMaterial color="#d97706" roughness={0.5} metalness={0.2} />
       </mesh>
-      {/* Heavy Counterweight */}
       <mesh position={[0, 2.2, -1.8]} castShadow>
         <boxGeometry args={[3.6, 1.6, 1.2]} />
         <meshStandardMaterial color="#78350f" roughness={0.7} />
       </mesh>
-      {/* Elevated Cab */}
       <mesh position={[1.4, 2.9, 1.1]} castShadow>
         <boxGeometry args={[1.4, 1.5, 1.8]} />
         <meshStandardMaterial color="#b45309" roughness={0.5} />
@@ -236,18 +234,14 @@ function Excavator({ x, z, rot }: { x: number; z: number; rot: number }) {
         <boxGeometry args={[1.2, 1.1, 0.05]} />
         <meshStandardMaterial color="#0f172a" roughness={0.2} metalness={0.8} />
       </mesh>
-
-      {/* Heavy Mono Boom */}
       <mesh position={[-0.8, 3.8, 2.4]} rotation={[0.45, 0, 0]} castShadow>
         <boxGeometry args={[0.7, 0.8, 6.2]} />
         <meshStandardMaterial color="#92400e" roughness={0.6} />
       </mesh>
-      {/* Arm Stick */}
       <mesh position={[-0.8, 4.5, 5.8]} rotation={[-0.8, 0, 0]} castShadow>
         <boxGeometry args={[0.6, 0.7, 4.4]} />
         <meshStandardMaterial color="#92400e" roughness={0.6} />
       </mesh>
-      {/* Heavy Bucket */}
       <mesh position={[-0.8, 2.3, 6.8]} rotation={[-0.3, 0, 0]} castShadow receiveShadow>
         <boxGeometry args={[1.8, 1.5, 1.8]} />
         <meshStandardMaterial color="#1c1917" roughness={0.85} metalness={0.4} />
@@ -274,10 +268,20 @@ export function Terrain() {
         <Patch key={`p${i}`} x={x} z={z} sx={sx} sz={sz} />
       ))}
 
-      {/* Main 18m Wide Unpaved Haul Road (Elevated 0.08m with 3D volume to completely eliminate Z-fighting) */}
+      {/* Main 18m Wide Unpaved Haul Road */}
       <mesh position={[0, 0.04, 0]} receiveShadow>
         <boxGeometry args={[18, 0.08, 380]} />
         <meshStandardMaterial color={SCENE.roadColor} roughness={0.92} />
+      </mesh>
+
+      {/* Compacted Heavy Tire Track Ruts on Haul Road */}
+      <mesh position={[-3.6, 0.042, 0]} receiveShadow>
+        <boxGeometry args={[2.4, 0.082, 380]} />
+        <meshStandardMaterial color="#261f1a" roughness={0.96} />
+      </mesh>
+      <mesh position={[3.6, 0.042, 0]} receiveShadow>
+        <boxGeometry args={[2.4, 0.082, 380]} />
+        <meshStandardMaterial color="#261f1a" roughness={0.96} />
       </mesh>
 
       {/* Safety Edge Berms along Haul Road */}
@@ -309,12 +313,10 @@ export function Terrain() {
 
       {/* Mine Drainage Sump / Silt Pond */}
       <group position={[-55, 0, 35]}>
-        {/* Pond Basin */}
         <mesh position={[0, 0.03, 0]} receiveShadow>
           <cylinderGeometry args={[11, 9, 0.3, 32]} />
           <meshStandardMaterial color={SCENE.pondColor} roughness={0.3} metalness={0.7} />
         </mesh>
-        {/* Rock perimeter bank */}
         <mesh position={[0, 0.18, 0]} rotation={[-Math.PI / 2, 0, 0]} castShadow receiveShadow>
           <torusGeometry args={[11.2, 0.6, 8, 32]} />
           <meshStandardMaterial color={SCENE.rockColor} roughness={0.95} />
@@ -373,6 +375,11 @@ export function Terrain() {
       <LightTower x={14} z={-70} rot={-0.3} />
       <LightTower x={-14} z={-130} rot={0.4} />
       <LightTower x={35} z={-45} rot={-0.8} />
+
+      {/* Mining Safety Road Signs */}
+      <MineSign x={-11} z={-40} text="SPEED 20" rot={0.2} />
+      <MineSign x={11} z={-100} text="CAUTION FOG" rot={-0.2} />
+      <MineSign x={-11} z={-160} text="HAUL ROAD" rot={0.1} />
     </group>
   );
 }
