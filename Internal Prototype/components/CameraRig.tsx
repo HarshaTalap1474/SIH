@@ -46,10 +46,10 @@ export function CameraRig() {
       // Driver seat inside the cab (left-side driver position, looking out through windshield)
       targetFov = 68;
       const cabX = -0.45;
-      const cabZ = 3.45; // forward in truck space towards negative Z
+      const cabZ = 4.12; // forward position right at the windshield plane
 
       tx = sim.x + rightX * cabX + fwdX * cabZ;
-      ty = 3.68;
+      ty = 3.65;
       tz = sim.z + rightZ * cabX + fwdZ * cabZ;
 
       // Look forward along haul road with dynamic look-ahead into turns

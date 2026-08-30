@@ -108,7 +108,7 @@ function FrontWheel({ x, z, index }: SingleWheelProps) {
   );
 }
 
-// Rear Heavy Dual Tires (Real-world mining haul truck dual axle wheel assemblies)
+// Rear Heavy Dual Tires
 function RearDualWheel({ x, z }: DualWheelProps) {
   const r = DUMPER.wheelRadius;
   const w = DUMPER.wheelWidth * 0.85;
@@ -168,6 +168,7 @@ export function Dumper() {
 
   const headlights = useSim((s) => s.headlights);
   const gear = useSim((s) => s.gear);
+  const camMode = useSim((s) => s.camMode);
 
   useLayoutEffect(() => {
     if (rig.current) rigParts.rig = rig.current;
@@ -185,6 +186,7 @@ export function Dumper() {
   });
 
   const isBraking = gear === "R" || gear === "N";
+  const inCockpit = camMode === "cockpit";
 
   return (
     <group ref={rig}>
@@ -304,19 +306,43 @@ export function Dumper() {
           <meshStandardMaterial color="#44403c" roughness={0.6} />
         </mesh>
 
-        {/* Front Windshield Glass */}
-        <mesh castShadow position={[-0.45, 2.0, -4.08]}>
-          <boxGeometry args={[2.1, 0.75, 0.12]} />
-          <meshStandardMaterial color={C.glass} roughness={0.12} metalness={0.9} />
-        </mesh>
+        {/* Front Windshield Glass (Transparent safety glass, completely unobtrusive in cockpit view) */}
+        {!inCockpit && (
+          <mesh position={[-0.45, 2.0, -4.08]}>
+            <boxGeometry args={[2.1, 0.75, 0.04]} />
+            <meshStandardMaterial
+              color="#93c5fd"
+              transparent
+              opacity={0.15}
+              roughness={0.05}
+              metalness={0.1}
+              depthWrite={false}
+            />
+          </mesh>
+        )}
+
         {/* Side Windows */}
         <mesh castShadow position={[-1.61, 1.95, -3.25]}>
-          <boxGeometry args={[0.1, 0.65, 1.3]} />
-          <meshStandardMaterial color={C.glass} roughness={0.12} metalness={0.9} />
+          <boxGeometry args={[0.04, 0.65, 1.3]} />
+          <meshStandardMaterial
+            color="#93c5fd"
+            transparent
+            opacity={0.25}
+            roughness={0.05}
+            metalness={0.1}
+            depthWrite={false}
+          />
         </mesh>
         <mesh castShadow position={[0.71, 1.95, -3.25]}>
-          <boxGeometry args={[0.1, 0.65, 1.3]} />
-          <meshStandardMaterial color={C.glass} roughness={0.12} metalness={0.9} />
+          <boxGeometry args={[0.04, 0.65, 1.3]} />
+          <meshStandardMaterial
+            color="#93c5fd"
+            transparent
+            opacity={0.25}
+            roughness={0.05}
+            metalness={0.1}
+            depthWrite={false}
+          />
         </mesh>
 
         {/* Side-View Mirrors on Steel Brackets */}
@@ -398,6 +424,7 @@ export function Dumper() {
           <boxGeometry args={[0.45, 2.2, 4.6]} />
           <meshStandardMaterial color={C.body} roughness={0.5} />
         </mesh>
+        {/* Bin Side Walls */}
         <mesh castShadow position={[2.95, 3.45, 0.9]}>
           <boxGeometry args={[0.45, 2.2, 4.6]} />
           <meshStandardMaterial color={C.body} roughness={0.5} />
@@ -461,7 +488,7 @@ export function Dumper() {
       <FrontWheel x={-DUMPER.frontX} z={DUMPER.frontZ} steer index={0} />
       <FrontWheel x={DUMPER.frontX} z={DUMPER.frontZ} steer index={1} />
 
-      {/* Rear Heavy Dual Axles (4 Dual Tire Assemblies = 8 Tires Total on Rear) */}
+      {/* Rear Heavy Dual Axles */}
       <RearDualWheel x={-DUMPER.rearX} z={DUMPER.rearZ1} indexA={2} indexB={3} />
       <RearDualWheel x={DUMPER.rearX} z={DUMPER.rearZ1} indexA={4} indexB={5} />
       <RearDualWheel x={-DUMPER.rearX} z={DUMPER.rearZ2} indexA={6} indexB={7} />
