@@ -14,6 +14,7 @@ export function CameraRig() {
     new THREE.Vector3(SCENE.cameraStart.x, SCENE.cameraStart.y, SCENE.cameraStart.z)
   );
   const lookTarget = useRef(new THREE.Vector3(0, CAMERA.lookHeight, 0));
+  const currentFov = useRef(55);
 
   useFrame(({ camera }, rawDt) => {
     const dt = Math.min(rawDt, 0.05);
@@ -26,6 +27,7 @@ export function CameraRig() {
     let lx: number = sim.x;
     let ly: number = CAMERA.lookHeight;
     let lz: number = sim.z;
+    let targetFov = 55;
 
     const fwdX = -Math.sin(sim.yaw);
     const fwdZ = -Math.cos(sim.yaw);
@@ -39,16 +41,32 @@ export function CameraRig() {
       lx = sim.x;
       ly = 0;
       lz = sim.z;
+      targetFov = 50;
     } else if (sim.camMode === "cockpit") {
-      // In-cabin first-person view
-      tx = sim.x + rightX * -0.55 + fwdX * 1.8;
-      ty = 3.65;
-      tz = sim.z + rightZ * -0.55 + fwdZ * 1.8;
-      lx = sim.x + fwdX * 30;
-      ly = 2.8;
-      lz = sim.z + fwdZ * 30;
+      // Driver seat inside the cab (left-side driver position, looking out through windshield)
+      targetFov = 68;
+      const cabX = -0.45;
+      const cabZ = 3.45; // forward in truck space towards negative Z
+
+      tx = sim.x + rightX * cabX + fwdX * cabZ;
+      ty = 3.68;
+      tz = sim.z + rightZ * cabX + fwdZ * cabZ;
+
+      // Look forward along haul road with dynamic look-ahead into turns
+      const lookDist = 35;
+      const steerLookAhead = sim.steer * 4.5;
+      lx = tx + fwdX * lookDist + rightX * steerLookAhead;
+      ly = 2.2; // slight downward gaze towards road surface
+      lz = tz + fwdZ * lookDist + rightZ * steerLookAhead;
+
+      // Subtle engine vibration in cabin
+      const clock = performance.now() / 1000;
+      const speedFrac = clamp(Math.abs(sim.speed) / 11, 0, 1);
+      const engineVibe = 0.006 * Math.sin(clock * 32) * (0.4 + 0.6 * speedFrac);
+      ty += engineVibe;
     } else {
-      // Chase mode
+      // Dynamic chase camera
+      targetFov = 55;
       const sensor = useSensor.getState();
       const t = clamp(
         (sensor.tiltK - SENSOR.deadzoneK) / (1 - SENSOR.deadzoneK),
@@ -68,13 +86,20 @@ export function CameraRig() {
       ty = height;
       tz = sim.z - Math.sin(ang) * CAMERA.chaseDist;
 
-      // Look slightly ahead of the truck
+      // Look ahead of the truck
       lx = sim.x + fwdX * 3.5;
       ly = CAMERA.lookHeight;
       lz = sim.z + fwdZ * 3.5;
     }
 
-    const dampSpeed = sim.camMode === "cockpit" ? 1 - Math.exp(-12 * dt) : k;
+    // Dynamic FOV interpolation
+    if (camera instanceof THREE.PerspectiveCamera) {
+      currentFov.current += (targetFov - currentFov.current) * (1 - Math.exp(-6 * dt));
+      camera.fov = currentFov.current;
+      camera.updateProjectionMatrix();
+    }
+
+    const dampSpeed = sim.camMode === "cockpit" ? 1 - Math.exp(-22 * dt) : k;
     camPos.current.x += (tx - camPos.current.x) * dampSpeed;
     camPos.current.y += (ty - camPos.current.y) * dampSpeed;
     camPos.current.z += (tz - camPos.current.z) * dampSpeed;
@@ -84,12 +109,13 @@ export function CameraRig() {
     lookTarget.current.y += (ly - lookTarget.current.y) * dampSpeed;
     lookTarget.current.z += (lz - lookTarget.current.z) * dampSpeed;
 
+    // Road impact / pothole camera jolt
     const impact = useSensor.getState().impact;
     if (impact > 0.02) {
       const clock = performance.now() / 1000;
-      const amp = impact * (sim.camMode === "cockpit" ? 0.12 : 0.06);
+      const amp = impact * (sim.camMode === "cockpit" ? 0.14 : 0.06);
       camPos.current.x += Math.sin(clock * 61) * amp;
-      camPos.current.y += Math.sin(clock * 47) * amp * 0.6;
+      camPos.current.y += Math.sin(clock * 47) * amp * 0.7;
       camPos.current.z += Math.sin(clock * 53) * amp;
     }
 
