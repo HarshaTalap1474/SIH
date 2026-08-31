@@ -97,12 +97,19 @@ function castRay(
     }
   }
 
-  // 3. Turning loop boundary check around (LOOP.x, LOOP.z)
-  const loopDist = Math.hypot(originX - LOOP.x, originZ - LOOP.z);
-  if (loopDist > 15 && loopDist < LOOP.radius + 15) {
-    const outerLoopR = LOOP.radius + LOOP.width / 2;
-    if (loopDist > outerLoopR - 4 && minDist > 15) {
-      minDist = Math.min(minDist, Math.max(2.5, outerLoopR - loopDist));
+  // 3. Turning loop outer boundary berm check
+  const oxLoop = originX - LOOP.x;
+  const ozLoop = originZ - LOOP.z;
+  const outerLoopR = LOOP.radius + LOOP.width / 2 + 0.6;
+  if (originZ <= -50 && Math.hypot(oxLoop, ozLoop) < outerLoopR) {
+    const b = oxLoop * dx + ozLoop * dz;
+    const c = oxLoop * oxLoop + ozLoop * ozLoop - outerLoopR * outerLoopR;
+    const disc = b * b - c;
+    if (disc > 0) {
+      const hitDist = -b + Math.sqrt(disc);
+      if (hitDist > 0 && hitDist < minDist) {
+        minDist = hitDist;
+      }
     }
   }
 
@@ -187,13 +194,13 @@ class ADASWebSocketClient {
     if (now - this.lastSendTime < 33) return;
     this.lastSendTime = now;
 
-    // Compute 5 frontal distance sensor rays + 1 rear ray
+    // Compute 5 frontal distance sensor rays + 1 rear ray (yaw + angle is Left, yaw - angle is Right)
     const DEG = Math.PI / 180;
-    const rFarLeft = castRay(x, z, yaw - 45 * DEG);
-    const rLeft = castRay(x, z, yaw - 20 * DEG);
+    const rFarLeft = castRay(x, z, yaw + 45 * DEG);
+    const rLeft = castRay(x, z, yaw + 20 * DEG);
     const rCenter = castRay(x, z, yaw);
-    const rRight = castRay(x, z, yaw + 20 * DEG);
-    const rFarRight = castRay(x, z, yaw + 45 * DEG);
+    const rRight = castRay(x, z, yaw - 20 * DEG);
+    const rFarRight = castRay(x, z, yaw - 45 * DEG);
     const rRear = castRay(x, z, yaw + 180 * DEG);
 
     const speedKmh = Math.abs(speed) * PHYSICS.kphPerUnit;
@@ -231,10 +238,11 @@ class ADASWebSocketClient {
       const speedMs = speedKmh / 3.6;
       const dSafe = speedMs * 0.25 + (speedMs * speedMs) / (2 * 3.2) + 2.5;
       const ttc = speedMs > 0.5 ? Math.round((minFwd / speedMs) * 10) / 10 : 99;
+      const isImminent = minFwd < 5.0;
 
       let risk: CollisionRisk = "SAFE";
       let eBrake = false;
-      if (minFwd <= dSafe || (minFwd < 6.5 && speedKmh > 2.0)) {
+      if (minFwd <= dSafe || isImminent || (minFwd < 6.5 && speedKmh > 2.0)) {
         risk = "CRITICAL";
         eBrake = true;
       } else if (minFwd <= (dSafe * 2.0 + 8.0) && minFwd < 40.0) {

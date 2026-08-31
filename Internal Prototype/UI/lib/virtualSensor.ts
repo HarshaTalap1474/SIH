@@ -106,6 +106,18 @@ export const useSensor = create<SensorState>()((set, get) => ({
 
   tick: (dt) => {
     const s = get();
+    // If sensor is inactive and at rest, avoid triggering React re-render budget
+    if (
+      !s.active &&
+      s.impact < 0.001 &&
+      Math.abs(s.roll) < 0.02 &&
+      Math.abs(s.pitch) < 0.02 &&
+      Math.abs(s.targetRoll) < 0.01 &&
+      Math.abs(s.targetPitch) < 0.01
+    ) {
+      return;
+    }
+
     const k = 1 - Math.exp(-SENSOR.smooth * dt);
 
     const roll = s.roll + (s.targetRoll - s.roll) * k;

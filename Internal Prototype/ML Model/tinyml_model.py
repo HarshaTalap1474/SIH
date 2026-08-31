@@ -136,20 +136,30 @@ class TinyMLCollisionModel:
         steer_val = float(pred_steer[0][0])
 
         speed_ms = float(feature_dict.get("speed_kmh", 0.0)) / 3.6
-        min_front_dist = min(
-            float(feature_dict.get("ray_far_left", 50.0)),
-            float(feature_dict.get("ray_left", 50.0)),
-            float(feature_dict.get("ray_center", 50.0)),
-            float(feature_dict.get("ray_right", 50.0)),
-            float(feature_dict.get("ray_far_right", 50.0)),
-        )
+        ray_fl = float(feature_dict.get("ray_far_left", 50.0))
+        ray_l = float(feature_dict.get("ray_left", 50.0))
+        ray_c = float(feature_dict.get("ray_center", 50.0))
+        ray_r = float(feature_dict.get("ray_right", 50.0))
+        ray_fr = float(feature_dict.get("ray_far_right", 50.0))
 
-        # Physics-based Time-to-Collision
-        ttc = (min_front_dist / max(speed_ms, 0.1)) if speed_ms > 0.5 else 99.0
+        # Forward trajectory threat distance (matches dataset_generator geometry)
+        fwd_threat_dist = min(ray_c, min(ray_l, ray_r) * 1.1)
+        min_all_dist = min(ray_fl, ray_l, ray_c, ray_r, ray_fr)
+
+        # Physics-based Time-to-Collision along vehicle travel trajectory
+        ttc = (fwd_threat_dist / max(speed_ms, 0.1)) if speed_ms > 0.5 else 99.0
         ttc = round(min(ttc, 99.0), 2)
 
+        # Imminent collision boundary along forward trajectory
+        is_imminent = fwd_threat_dist < 5.0
+
+        if is_imminent:
+            risk_idx = 2
+            risk_label = "CRITICAL"
+            risk_confidence = max(risk_confidence, 0.98)
+
         # Emergency brake threshold trigger
-        should_emergency_brake = risk_idx == 2 or brake_val > 0.65 or (ttc < 1.6 and min_front_dist < 18.0)
+        should_emergency_brake = risk_idx == 2 or brake_val > 0.60 or (ttc < 1.8 and fwd_threat_dist < 20.0) or is_imminent
 
         return {
             "collision_risk": risk_label,
@@ -159,7 +169,7 @@ class TinyMLCollisionModel:
             "brake_intensity": round(max(brake_val if should_emergency_brake else 0.0, 1.0 if should_emergency_brake else 0.0), 3),
             "steering_guidance": round(steer_val, 3),
             "ttc_seconds": ttc,
-            "closest_obstacle_m": round(min_front_dist, 2),
+            "closest_obstacle_m": round(fwd_threat_dist, 2),
         }
 
     def save(self, filepath: str):

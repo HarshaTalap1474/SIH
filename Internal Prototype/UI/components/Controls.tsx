@@ -47,9 +47,12 @@ export function Controls() {
 
     let throttle = keyThrottle;
 
-    // Autonomous Emergency Braking (AEB) intervention
-    if (adas.emergencyBrake && speed > 0.05) {
-      throttle = 0; // Cut throttle
+    // Autonomous Emergency Braking (AEB) intervention:
+    // If AEB is active, suppress forward drive into obstacle, but allow reverse ('S') to back away!
+    const isReversing = keyThrottle < 0 || (speed < -0.05 && keyThrottle <= 0);
+
+    if (adas.emergencyBrake && !isReversing) {
+      throttle = 0; // Cut forward throttle
     }
 
     steer = clamp((a ? 1 : 0) - (d ? 1 : 0), -1, 1);
@@ -61,9 +64,9 @@ export function Controls() {
         : PHYSICS.reverseMaxSpeed;
     const target = throttle * maxSpeed;
 
-    if (adas.emergencyBrake && speed > 0.05) {
+    if (adas.emergencyBrake && !isReversing && speed > 0.02) {
       // High-power emergency brake deceleration
-      speed = Math.max(0, speed - PHYSICS.brake * 3.2 * dt);
+      speed = Math.max(0, speed - PHYSICS.brake * 3.5 * dt);
     } else if (Math.abs(throttle) > PHYSICS.throttleDeadzone) {
       if (target > speed) {
         speed = Math.min(target, speed + PHYSICS.accel * dt);

@@ -8,6 +8,7 @@ trigger: always_on
 
 This repository uses a **feature-branch workflow**.
 
+- `Never Push the changes to any branch without any permison`
 - `main` is the stable, tested branch.
 - No teammate or coding agent may push directly to `main`.
 - Each task is developed on its own branch.

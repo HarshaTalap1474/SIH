@@ -130,8 +130,8 @@ def generate_haul_road_dataset(n_samples: int = 100000, seed: int = 42):
         # Forward collision is determined by the center ray and slightly angled rays
         fwd_threat_dist = min(d_center, min(ray_l[i], ray_r[i]) * 1.1)
 
-        # Critical Condition: Obstacle inside forward stopping distance
-        if (fwd_threat_dist <= d_req and v > 0.8) or (fwd_threat_dist < 6.5 and v > 1.2):
+        # Critical Condition: Obstacle inside forward stopping distance OR imminent collision zone (<5.0m)
+        if (fwd_threat_dist <= d_req and v > 0.8) or (fwd_threat_dist < 6.5 and v > 1.0) or (fwd_threat_dist < 5.0):
             y_risk[i] = 2  # CRITICAL
             y_brake[i] = 1.0
         # Caution Condition: Obstacle in forward warning zone
