@@ -153,16 +153,18 @@ class TinyMLCollisionModel:
         ttc = (fwd_threat_dist / max(speed_ms, 0.1)) if speed_ms > 0.5 else 99.0
         ttc = round(min(ttc, 99.0), 2)
 
-        # Imminent collision boundary along forward trajectory
-        is_imminent = fwd_threat_dist < 5.0
+        # Physics-based safe stopping distance required
+        d_req_stop = (speed_ms * 0.25) + ((speed_ms ** 2) / (2.0 * 3.2)) + 3.0
+        is_in_stopping_zone = (fwd_threat_dist <= d_req_stop and speed_ms > 0.6)
+        is_imminent = fwd_threat_dist < 4.5
 
-        if is_imminent:
+        if is_imminent or is_in_stopping_zone:
             risk_idx = 2
             risk_label = "CRITICAL"
             risk_confidence = max(risk_confidence, 0.98)
 
         # Emergency brake threshold trigger
-        should_emergency_brake = risk_idx == 2 or brake_val > 0.60 or (ttc < 1.8 and fwd_threat_dist < 20.0) or is_imminent
+        should_emergency_brake = risk_idx == 2 or brake_val > 0.55 or is_in_stopping_zone or is_imminent
 
         return {
             "collision_risk": risk_label,

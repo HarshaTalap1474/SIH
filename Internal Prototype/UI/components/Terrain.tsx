@@ -10,23 +10,7 @@ import {
   STOCKPILES,
 } from "@/lib/constants";
 
-// Safety berms along the main haul road to prevent falling into the pit
-function RoadBerms() {
-  return (
-    <group>
-      {/* Left Berm */}
-      <mesh position={[-9.6, 0.45, 0]} castShadow receiveShadow>
-        <cylinderGeometry args={[0.5, 1.3, 380, 8]} />
-        <meshStandardMaterial color={SCENE.roadBermColor} roughness={0.95} />
-      </mesh>
-      {/* Right Berm */}
-      <mesh position={[9.6, 0.45, 0]} castShadow receiveShadow>
-        <cylinderGeometry args={[0.5, 1.3, 380, 8]} />
-        <meshStandardMaterial color={SCENE.roadBermColor} roughness={0.95} />
-      </mesh>
-    </group>
-  );
-}
+
 
 // Mining Road Signs
 function MineSign({ x, z, text, rot = 0 }: { x: number; z: number; text: string; rot?: number }) {
@@ -229,10 +213,7 @@ export function Terrain() {
         <meshStandardMaterial color="#261f1a" roughness={0.96} />
       </mesh>
 
-      {/* Safety Edge Berms along Haul Road */}
-      <RoadBerms />
-
-      {/* High-Visibility Road Edge Guides */}
+      {/* High-Visibility Road Edge Guides (Visual Lane Markers) */}
       <mesh position={[-8.4, 0.085, 0]}>
         <boxGeometry args={[0.4, 0.02, 380]} />
         <meshStandardMaterial color={SCENE.roadLineColor} roughness={0.8} />

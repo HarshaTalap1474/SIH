@@ -76,28 +76,7 @@ function castRay(
     }
   }
 
-  // 2. Road Berm boundary check
-  // Straight road left/right berms at x = -9.6 and +9.6
-  // Check intersection only if ray points towards the side berms
-  const ROAD_HALF_WIDTH = 9.4;
-  if (Math.abs(originX) <= ROAD_HALF_WIDTH + 1.5) {
-    // If ray points towards left berm (dx < -0.15)
-    if (dx < -0.15) {
-      const distToLeft = (-ROAD_HALF_WIDTH - originX) / dx;
-      if (distToLeft > 0 && distToLeft < minDist) {
-        minDist = distToLeft;
-      }
-    }
-    // If ray points towards right berm (dx > 0.15)
-    else if (dx > 0.15) {
-      const distToRight = (ROAD_HALF_WIDTH - originX) / dx;
-      if (distToRight > 0 && distToRight < minDist) {
-        minDist = distToRight;
-      }
-    }
-  }
-
-  // 3. Pit outer mountain rim check (exact ray-circle boundary intersection)
+  // 2. Pit outer mountain rim check (exact ray-circle boundary intersection)
   const b = originX * dx + originZ * dz;
   const c = originX * originX + originZ * originZ - PHYSICS.arenaRadius * PHYSICS.arenaRadius;
   const disc = b * b - c;
@@ -182,14 +161,25 @@ class ADASWebSocketClient {
     if (now - this.lastSendTime < 33) return;
     this.lastSendTime = now;
 
-    // Compute 5 frontal distance sensor rays + 1 rear ray (yaw + angle is Left, yaw - angle is Right)
     const DEG = Math.PI / 180;
-    const rFarLeft = castRay(x, z, yaw + 45 * DEG);
-    const rLeft = castRay(x, z, yaw + 20 * DEG);
-    const rCenter = castRay(x, z, yaw);
-    const rRight = castRay(x, z, yaw - 20 * DEG);
-    const rFarRight = castRay(x, z, yaw - 45 * DEG);
-    const rRear = castRay(x, z, yaw + 180 * DEG);
+    const fx = -Math.sin(yaw);
+    const fz = -Math.cos(yaw);
+
+    // Front sensor mount location (front bumper of the truck, 3.1m in front of center)
+    const sensorX = x + fx * 3.1;
+    const sensorZ = z + fz * 3.1;
+
+    // Rear sensor mount location (rear bumper, 3.1m behind center)
+    const rearX = x - fx * 3.1;
+    const rearZ = z - fz * 3.1;
+
+    // Compute 5 frontal distance sensor rays + 1 rear ray
+    const rFarLeft = castRay(sensorX, sensorZ, yaw + 45 * DEG);
+    const rLeft = castRay(sensorX, sensorZ, yaw + 20 * DEG);
+    const rCenter = castRay(sensorX, sensorZ, yaw);
+    const rRight = castRay(sensorX, sensorZ, yaw - 20 * DEG);
+    const rFarRight = castRay(sensorX, sensorZ, yaw - 45 * DEG);
+    const rRear = castRay(rearX, rearZ, yaw + 180 * DEG);
 
     const speedKmh = Math.abs(speed) * PHYSICS.kphPerUnit;
     // Lateral offset relative to straight haul road center (x = 0)
@@ -221,19 +211,20 @@ class ADASWebSocketClient {
       };
       this.ws.send(JSON.stringify(payload));
     } else {
-      // Local fallback calculation aligned with map geometry
-      const minFwd = Math.min(rCenter, Math.min(rLeft, rRight) * 1.05);
+      // Local fallback calculation
+      const fwdThreatDist = Math.min(rCenter, Math.min(rLeft, rRight) * 1.5);
       const speedMs = speedKmh / 3.6;
-      const dSafe = speedMs * 0.25 + (speedMs * speedMs) / (2 * 3.2) + 2.5;
-      const ttc = speedMs > 0.5 ? Math.round((minFwd / speedMs) * 10) / 10 : 99;
-      const isImminent = minFwd < 5.0;
+      const dSafe = speedMs * 0.25 + (speedMs * speedMs) / (2 * 3.2) + 3.0;
+      const ttc = speedMs > 0.5 ? Math.round((fwdThreatDist / speedMs) * 10) / 10 : 99;
+      const isImminent = fwdThreatDist < 4.5;
+      const isInStoppingZone = fwdThreatDist <= dSafe && speedMs > 0.6;
 
       let risk: CollisionRisk = "SAFE";
       let eBrake = false;
-      if (minFwd <= dSafe || isImminent || (minFwd < 6.5 && speedKmh > 2.0)) {
+      if (isInStoppingZone || isImminent) {
         risk = "CRITICAL";
         eBrake = true;
-      } else if (minFwd <= (dSafe * 2.0 + 8.0) && minFwd < 40.0) {
+      } else if (fwdThreatDist <= (dSafe * 1.6 + 8.0) && fwdThreatDist < 45.0) {
         risk = "CAUTION";
       }
 
@@ -246,7 +237,7 @@ class ADASWebSocketClient {
         brakeIntensity: eBrake ? 1.0 : (risk === "CAUTION" ? 0.35 : 0),
         steeringGuidance: Math.round(steerGuide * 100) / 100,
         ttcSeconds: ttc,
-        closestObstacleM: minFwd,
+        closestObstacleM: fwdThreatDist,
       });
     }
   }
