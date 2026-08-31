@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import { BLOCKERS, LOOP, PHYSICS } from "./constants";
+import { BLOCKERS, PHYSICS } from "./constants";
 
 export type CollisionRisk = "SAFE" | "CAUTION" | "CRITICAL";
 
@@ -97,23 +97,7 @@ function castRay(
     }
   }
 
-  // 3. Turning loop outer boundary berm check
-  const oxLoop = originX - LOOP.x;
-  const ozLoop = originZ - LOOP.z;
-  const outerLoopR = LOOP.radius + LOOP.width / 2 + 0.6;
-  if (originZ <= -50 && Math.hypot(oxLoop, ozLoop) < outerLoopR) {
-    const b = oxLoop * dx + ozLoop * dz;
-    const c = oxLoop * oxLoop + ozLoop * ozLoop - outerLoopR * outerLoopR;
-    const disc = b * b - c;
-    if (disc > 0) {
-      const hitDist = -b + Math.sqrt(disc);
-      if (hitDist > 0 && hitDist < minDist) {
-        minDist = hitDist;
-      }
-    }
-  }
-
-  // 4. Pit outer mountain rim check
+  // 3. Pit outer mountain rim check
   const arenaDist = Math.hypot(originX, originZ);
   const boundaryClearance = PHYSICS.arenaRadius - arenaDist;
   if (boundaryClearance > 0 && boundaryClearance < minDist) {

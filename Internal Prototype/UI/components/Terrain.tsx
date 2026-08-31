@@ -2,7 +2,6 @@
 
 import * as THREE from "three";
 import {
-  LOOP,
   PATCHES,
   PIT_BENCHES,
   PHYSICS,
@@ -23,11 +22,6 @@ function RoadBerms() {
       {/* Right Berm */}
       <mesh position={[9.6, 0.45, 0]} castShadow receiveShadow>
         <cylinderGeometry args={[0.5, 1.3, 380, 8]} />
-        <meshStandardMaterial color={SCENE.roadBermColor} roughness={0.95} />
-      </mesh>
-      {/* Loop outer safety berm */}
-      <mesh position={[LOOP.x, 0.45, LOOP.z]} rotation={[-Math.PI / 2, 0, 0]} castShadow receiveShadow>
-        <torusGeometry args={[LOOP.radius + LOOP.width / 2 + 0.6, 0.75, 8, 48]} />
         <meshStandardMaterial color={SCENE.roadBermColor} roughness={0.95} />
       </mesh>
     </group>
@@ -121,34 +115,6 @@ function BenchTerrace({ r, h, color, topColor }: { r: number; h: number; color: 
   );
 }
 
-function LightTower({ x, z, rot = 0 }: { x: number; z: number; rot?: number }) {
-  return (
-    <group position={[x, 0, z]} rotation={[0, rot, 0]}>
-      <mesh position={[0, 0.5, 0]} castShadow receiveShadow>
-        <boxGeometry args={[2, 1, 2]} />
-        <meshStandardMaterial color="#57534e" roughness={0.9} />
-      </mesh>
-      <mesh position={[0, 7.5, 0]} castShadow>
-        <cylinderGeometry args={[0.3, 0.5, 14, 6]} />
-        <meshStandardMaterial color="#78716c" roughness={0.6} metalness={0.5} />
-      </mesh>
-      <mesh position={[0, 14.5, 0.4]} castShadow>
-        <boxGeometry args={[2.4, 0.8, 0.6]} />
-        <meshStandardMaterial color="#292524" roughness={0.5} />
-      </mesh>
-      {[-0.7, 0.7].map((lx, i) => (
-        <group key={i} position={[lx, 14.3, 0.7]}>
-          <mesh rotation={[0.4, 0, 0]}>
-            <boxGeometry args={[0.9, 0.6, 0.3]} />
-            <meshStandardMaterial color="#fef08a" emissive="#fde047" emissiveIntensity={1.8} />
-          </mesh>
-        </group>
-      ))}
-      <pointLight position={[0, 14, 1.5]} intensity={16} distance={50} color="#fef08a" />
-    </group>
-  );
-}
-
 function Loader({ x, z, rot }: { x: number; z: number; rot: number }) {
   return (
     <group position={[x, 0, z]} rotation={[0, rot, 0]}>
@@ -234,8 +200,6 @@ function Excavator({ x, z, rot }: { x: number; z: number; rot: number }) {
 const RAMP_TILT = Math.atan(5 / 16);
 
 export function Terrain() {
-  const loopR = LOOP.radius;
-
   return (
     <group>
       {/* Base Quarry Pit Floor — Solid 3D Base */}
@@ -276,14 +240,6 @@ export function Terrain() {
       <mesh position={[8.4, 0.085, 0]}>
         <boxGeometry args={[0.4, 0.02, 380]} />
         <meshStandardMaterial color={SCENE.roadLineColor} roughness={0.8} />
-      </mesh>
-
-      {/* Turnaround Loop (Proper 3D ring with height) */}
-      <mesh position={[LOOP.x, 0.04, LOOP.z]} receiveShadow>
-        <cylinderGeometry
-          args={[loopR + LOOP.width / 2, loopR + LOOP.width / 2, 0.08, 48, 1, false, 0, Math.PI * 2]}
-        />
-        <meshStandardMaterial color={SCENE.roadColor} roughness={0.92} />
       </mesh>
 
       {/* Mine Perimeter Boundary Berm */}
@@ -333,8 +289,6 @@ export function Terrain() {
         <Rock key={`r${i}`} x={x} z={z} s={s} i={i} />
       ))}
 
-
-
       {/* Stepped Terraced Pit Benches (Bailadila Open-Cast Mine Walls) */}
       {PIT_BENCHES.map((b, i) => (
         <BenchTerrace key={`b${i}`} r={b.r} h={b.h} color={b.color} topColor={b.topColor} />
@@ -347,12 +301,6 @@ export function Terrain() {
       <Mound x={-155} z={-30} r={32} h={20} />
       <Mound x={12} z={155} r={28} h={18} />
       <Mound x={10} z={-155} r={32} h={20} />
-
-      {/* Industrial Floodlight Towers around Haul Road */}
-      <LightTower x={-14} z={-10} rot={0.3} />
-      <LightTower x={14} z={-70} rot={-0.3} />
-      <LightTower x={-14} z={-130} rot={0.4} />
-      <LightTower x={35} z={-45} rot={-0.8} />
 
       {/* Mining Safety Road Signs */}
       <MineSign x={-11} z={-40} text="SPEED 20" rot={0.2} />
