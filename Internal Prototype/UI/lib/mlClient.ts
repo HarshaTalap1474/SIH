@@ -97,11 +97,15 @@ function castRay(
     }
   }
 
-  // 3. Pit outer mountain rim check
-  const arenaDist = Math.hypot(originX, originZ);
-  const boundaryClearance = PHYSICS.arenaRadius - arenaDist;
-  if (boundaryClearance > 0 && boundaryClearance < minDist) {
-    minDist = Math.min(minDist, boundaryClearance);
+  // 3. Pit outer mountain rim check (exact ray-circle boundary intersection)
+  const b = originX * dx + originZ * dz;
+  const c = originX * originX + originZ * originZ - PHYSICS.arenaRadius * PHYSICS.arenaRadius;
+  const disc = b * b - c;
+  if (disc > 0) {
+    const hitDist = -b + Math.sqrt(disc);
+    if (hitDist > 0 && hitDist < minDist) {
+      minDist = hitDist;
+    }
   }
 
   return Math.round(minDist * 10) / 10;

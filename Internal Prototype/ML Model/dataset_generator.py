@@ -126,18 +126,22 @@ def generate_haul_road_dataset(n_samples: int = 100000, seed: int = 42):
         d_req = d_safe_stop[i]
         lat = lateral_offsets[i]
 
-        # Effective forward trajectory clearance
-        # Forward collision is determined by the center ray and slightly angled rays
-        fwd_threat_dist = min(d_center, min(ray_l[i], ray_r[i]) * 1.1)
+        # In-lane forward trajectory threat distance:
+        # Side rays (20 deg) only register as in-lane threats if obstacle is inside lane clearance (<16.0m)
+        fwd_threat_dist = min(
+            d_center,
+            ray_l[i] * 1.5 if ray_l[i] < 16.0 else 99.0,
+            ray_r[i] * 1.5 if ray_r[i] < 16.0 else 99.0,
+        )
 
         # Critical Condition: Obstacle inside forward stopping distance OR imminent collision zone (<5.0m)
         if (fwd_threat_dist <= d_req and v > 0.8) or (fwd_threat_dist < 6.5 and v > 1.0) or (fwd_threat_dist < 5.0):
             y_risk[i] = 2  # CRITICAL
             y_brake[i] = 1.0
         # Caution Condition: Obstacle in forward warning zone
-        elif fwd_threat_dist <= (d_req * 2.0 + 8.0) and fwd_threat_dist < 40.0:
+        elif fwd_threat_dist <= (d_req * 1.8 + 6.0) and fwd_threat_dist < 42.0:
             y_risk[i] = 1  # CAUTION
-            urgency = 1.0 - (fwd_threat_dist - d_req) / max((d_req * 1.2 + 8.0), 1e-3)
+            urgency = 1.0 - (fwd_threat_dist - d_req) / max((d_req * 1.0 + 6.0), 1e-3)
             y_brake[i] = float(np.clip(urgency * 0.5, 0.05, 0.6))
         else:
             # Safe: Road is clear

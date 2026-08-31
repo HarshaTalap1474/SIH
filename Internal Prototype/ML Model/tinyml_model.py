@@ -142,9 +142,12 @@ class TinyMLCollisionModel:
         ray_r = float(feature_dict.get("ray_right", 50.0))
         ray_fr = float(feature_dict.get("ray_far_right", 50.0))
 
-        # Forward trajectory threat distance (matches dataset_generator geometry)
-        fwd_threat_dist = min(ray_c, min(ray_l, ray_r) * 1.1)
-        min_all_dist = min(ray_fl, ray_l, ray_c, ray_r, ray_fr)
+        # Forward trajectory threat distance (matches dataset_generator lane geometry)
+        fwd_threat_dist = min(
+            ray_c,
+            ray_l * 1.5 if ray_l < 16.0 else 99.0,
+            ray_r * 1.5 if ray_r < 16.0 else 99.0,
+        )
 
         # Physics-based Time-to-Collision along vehicle travel trajectory
         ttc = (fwd_threat_dist / max(speed_ms, 0.1)) if speed_ms > 0.5 else 99.0
