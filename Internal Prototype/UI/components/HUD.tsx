@@ -139,10 +139,10 @@ export function HUD() {
           {(["P", "R", "N", "D", "B"] as const).map((g) => {
             const isCurrent =
               (g === "B" && boost) ||
-              (g === "R" && gear === "R") ||
+              (g === "R" && gear === "R" && !boost) ||
               (g === "D" && gear === "D" && !boost) ||
-              (g === "N" && gear === "N" && speedKmh === 0) ||
-              (g === "P" && speedKmh === 0 && gear === "N");
+              (g === "N" && gear === "N" && !boost) ||
+              (g === "P" && gear === "P" && !boost);
 
             return (
               <div

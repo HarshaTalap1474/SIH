@@ -5,7 +5,7 @@ import { useFrame } from "@react-three/fiber";
 import { BLOCKERS, DUMPER, PHYSICS, clamp, damp } from "@/lib/constants";
 import { isKeyDown } from "@/lib/keys";
 import { useSensor } from "@/lib/virtualSensor";
-import { useSim } from "@/lib/simStore";
+import { useSim, GearMode } from "@/lib/simStore";
 import { rigParts } from "@/lib/rig";
 import { adasClient, useAdasStore } from "@/lib/mlClient";
 
@@ -16,6 +16,7 @@ export function Controls() {
   const steerVis = useRef(0);
   const spinAngle = useRef(0);
   const joltVis = useRef(0);
+  const aebLatched = useRef(false);
 
   useEffect(() => {
     adasClient.init();
@@ -45,14 +46,31 @@ export function Controls() {
     } else if (w) keyThrottle = 1;
     else if (s) keyThrottle = -1;
 
-    let throttle = keyThrottle;
-
-    // Autonomous Emergency Braking (AEB) intervention:
-    // If AEB is active, suppress forward drive into obstacle, but allow reverse ('S') to back away!
+    // Active Reversing condition (driver pressing 'S' or moving backward)
     const isReversing = keyThrottle < 0 || (speed < -0.05 && keyThrottle <= 0);
 
-    if (adas.emergencyBrake && !isReversing) {
-      throttle = 0; // Cut forward throttle
+    // AEB Latch: If emergency brake triggers OR obstacle is within 4.8m in front of bumper
+    if (adas.emergencyBrake || adas.closestObstacleM < 4.8) {
+      if (!isReversing) {
+        aebLatched.current = true;
+      }
+    }
+
+    // Release AEB Latch when:
+    // 1. Driver has reversed away or steered so clearance opens up (> 6.0m)
+    // 2. OR driver is actively in reverse
+    if (adas.closestObstacleM > 6.0 && !adas.emergencyBrake) {
+      aebLatched.current = false;
+    }
+    if (isReversing && speed < -0.05) {
+      aebLatched.current = false;
+    }
+
+    const isBlockedAhead = (aebLatched.current || adas.emergencyBrake) && !isReversing;
+
+    let throttle = keyThrottle;
+    if (isBlockedAhead && throttle > 0) {
+      throttle = 0; // Cut forward throttle completely
     }
 
     steer = clamp((a ? 1 : 0) - (d ? 1 : 0), -1, 1);
@@ -64,9 +82,13 @@ export function Controls() {
         : PHYSICS.reverseMaxSpeed;
     const target = throttle * maxSpeed;
 
-    if (adas.emergencyBrake && !isReversing && speed > 0.02) {
-      // High-power emergency brake deceleration
-      speed = Math.max(0, speed - PHYSICS.brake * 3.5 * dt);
+    if (isBlockedAhead) {
+      // Rapidly bring speed to 0 and hold strictly at 0
+      if (speed > 0.01) {
+        speed = Math.max(0, speed - PHYSICS.brake * 4.0 * dt);
+      } else {
+        speed = 0;
+      }
     } else if (Math.abs(throttle) > PHYSICS.throttleDeadzone) {
       if (target > speed) {
         speed = Math.min(target, speed + PHYSICS.accel * dt);
@@ -113,8 +135,19 @@ export function Controls() {
       }
     }
 
+    // Stable transmission gear determination
+    const gear: GearMode = boost
+      ? "B"
+      : isReversing
+        ? "R"
+        : (keyThrottle > 0 || speed > 0.1)
+          ? "D"
+          : (speed === 0 && keyThrottle === 0)
+            ? "P"
+            : "N";
+
     // Call setFrame to update speedKmh, gear, and state synchronously
-    useSim.getState().setFrame({ x, z, yaw, speed, steer, boost });
+    useSim.getState().setFrame({ x, z, yaw, speed, steer, boost, gear });
 
     if (rigParts.rig) {
       rigParts.rig.position.set(x, 0, z);

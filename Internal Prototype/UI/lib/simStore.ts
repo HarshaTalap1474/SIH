@@ -3,7 +3,7 @@ import { PHYSICS, START_POS } from "./constants";
 
 export type CamMode = "chase" | "top" | "cockpit";
 export type FogMode = "heavy" | "medium" | "clear";
-export type GearMode = "D" | "R" | "N" | "B";
+export type GearMode = "P" | "R" | "N" | "D" | "B";
 
 interface SimStore {
   x: number;
@@ -24,6 +24,7 @@ interface SimStore {
     speed: number;
     steer: number;
     boost: boolean;
+    gear?: GearMode;
   }) => void;
   toggleCam: () => void;
   setCamMode: (mode: CamMode) => void;
@@ -41,19 +42,19 @@ export const useSim = create<SimStore>()((set) => ({
   boost: false,
   camMode: "chase",
   speedKmh: 0,
-  gear: "N",
+  gear: "P",
   headlights: true,
   fogMode: "heavy",
 
-  setFrame: ({ x, z, yaw, speed, steer, boost }) => {
+  setFrame: ({ x, z, yaw, speed, steer, boost, gear: passedGear }) => {
     const speedKmh = Math.round(Math.abs(speed) * PHYSICS.kphPerUnit);
-    const gear: GearMode = boost
+    const gear: GearMode = passedGear || (boost
       ? "B"
       : speed > 0.15
       ? "D"
       : speed < -0.15
       ? "R"
-      : "N";
+      : "P");
 
     set({
       x,
