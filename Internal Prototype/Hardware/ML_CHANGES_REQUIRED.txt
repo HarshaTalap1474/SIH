@@ -1,0 +1,58 @@
+=============================================================
+ ML TEAM — CHANGES REQUIRED FOR ESP32 + MPU6050 + 5 BUTTONS
+=============================================================
+
+=============================================================
+ SUMMARY: NO CHANGES REQUIRED TO THE ML MODEL OR SERVER
+=============================================================
+
+The V2 hardware integration does NOT touch the ML pipeline.
+
+--------------------------------------------------------------
+ WHY
+--------------------------------------------------------------
+The ML model (tinyml_model.py) takes exactly 9 inputs:
+    ray_far_left, ray_left, ray_center, ray_right,
+    ray_far_right, ray_rear, speed_kmh, steer_angle, lateral_offset
+
+The real hardware adds:
+  - MPU6050 IMU data (pitch, roll, yaw, accel, gyro)
+  - 5 physical buttons (throttle, brake, steer, e-stop)
+
+These are used ONLY for:
+  - Camera look-around (cockpit/chase)   → UI-only, camera offset
+  - Driving input (buttons → same vars keyboard wrote) → UI-only
+  - HUD gauges / road anomaly            → UI-only display
+
+The ML model continues to decide COLLISION AVOIDANCE from the 6
+ray distances + speed + steer + lateral offset produced by the
+browser's raycast. The MPU6050 data is NOT fed into the model.
+
+--------------------------------------------------------------
+ WHAT YOU SHOULD VERIFY (no code change, just sanity)
+--------------------------------------------------------------
+1. inference_server.py still starts on ws://localhost:8765/ws/telemetry
+2. The UI's mlClient.ts still sends the same 9-feature JSON to it.
+3. The ray distances sent to the model still come from the 2D
+   map raycast (mlClient.ts) — hardware does not replace these
+   simulated rays in this prototype.
+
+--------------------------------------------------------------
+ FUTURE OPTION (NOT IN THIS PHASE)
+--------------------------------------------------------------
+If a future phase wants rollover-risk to be model-driven (instead
+of the current threshold-based code in virtualSensor.ts), the model
+would need:
+  - New input features (e.g., roll_deg, pitch_deg, lateral_accel_g)
+  - Retraining on synthetic data extended for those features
+  - Larger weights file & longer train time
+
+This is explicitly OUT OF SCOPE for the current V2 hardware
+integration. The existing threshold logic already handles
+SAFE/CAUTION/ROLLOVER_RISK from tilt angles.
+
+--------------------------------------------------------------
+ BOTTOM LINE
+--------------------------------------------------------------
+ML team: NO ACTION NEEDED. Your server + model remain unchanged.
+The hardware integration is entirely a UI-side + firmware change.

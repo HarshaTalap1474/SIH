@@ -1,0 +1,183 @@
+=============================================================
+ UI TEAM — CHANGES REQUIRED FOR ESP32 + MPU6050 + 5 BUTTONS
+=============================================================
+
+This file lists the EXACT changes the UI team must make in
+"Internal Prototype/UI/" to support the new V2 hardware
+integration. The hardware side (ESP32 firmware + wiring) is
+handled by the Hardware team — UI only has to consume the data.
+
+READ THE FULL CONTEXT FIRST:
+  Internal Prototype/Hardware/HARDWARE_INTEGRATION_PLAN.md
+
+--------------------------------------------------------------
+ DATA FORMAT COMING FROM ESP32 (over WebSocket, ~50Hz)
+--------------------------------------------------------------
+{
+  "mpu": {
+    "pitch": 12.3, "roll": -4.1, "yaw": 270.5,
+    "ax": 0.02, "ay": -0.06, "az": 0.98,
+    "anomaly": false
+  },
+  "btn": {
+    "throttle": false, "brake": true,
+    "left": false, "right": false, "estop": false
+  }
+}
+
+--------------------------------------------------------------
+ CHANGE 1 — NEW FILE: lib/hardwareClient.ts
+--------------------------------------------------------------
+Create a new WebSocket client that:
+  - Connects to ws://<esp32-ip>:81/ws (make IP configurable, env var)
+  - On every message, parses JSON
+  - If "mpu" field present:
+      call useSensor.getState().setHardwareData(mpu)  [see Change 2]
+  - If "btn" field present:
+      store in a new useHardwareStore (buttons: {throttle, brake, left, right, estop})
+  - Tracks connection state:
+      useHardwareStore = { connected: boolean, lastSeen: number, esp32Ip: string }
+  - On close/timeout (3s): set connected=false,
+      call useSensor.getState().setSource("virtual-pad")  [fallback]
+  - Auto-reconnect every 3s
+  - Export:
+      hwClient.connect()
+      hwClient.disconnect()
+      useHardwareStore (Zustand)
+
+  RECOMMENDED: default URL uses a hostname/env like
+  process.env.NEXT_PUBLIC_ESP32_WS || "ws://192.168.1.100:81/ws"
+
+--------------------------------------------------------------
+ CHANGE 2 — lib/virtualSensor.ts
+--------------------------------------------------------------
+(a) Add a new method to the store: setHardwareData(data)
+
+    setHardwareData: (data: {
+      pitch, roll, yaw, ax, ay, az, anomaly
+    }) => set({
+      pitch: data.pitch,
+      roll: data.roll,
+      yawHeading: data.yaw,
+      ax: data.ax, ay: data.ay, az: data.az,
+      roadAnomaly: data.anomaly,
+      source: "hardware",
+      active: true,
+    }),
+
+(b) In tick(dt): when source === "hardware",
+    SKIP the virtual-pad interpolation that overwrites
+    roll/pitch/yawHeading from targetRoll/targetPitch/targetYaw.
+    (Hardware data must NOT be smoothed/overridden by the pad.)
+    Keep the impact-decay/roadAnomaly logic running.
+
+--------------------------------------------------------------
+ CHANGE 3 — lib/simStore.ts
+--------------------------------------------------------------
+Add new camera-look state for cockpit look-around:
+    cameraLookYaw: number    // -45° to +45°  (from MPU6050 roll)
+    cameraLookPitch: number  // -30° to +30°  (from MPU6050 pitch)
+    setCameraLook: (yaw: number, pitch: number) => void
+
+Add to resetSim():
+    cameraLookYaw: 0, cameraLookPitch: 0
+
+--------------------------------------------------------------
+ CHANGE 4 — components/CameraRig.tsx
+--------------------------------------------------------------
+(a) COCKPIT MODE (the existing "cockpit" branch, ~line 45):
+    After computing tx/ty/tz and the base look target,
+    apply MPU6050 look offsets:
+      - Map sensor.roll  (-30..+30°)  → cameraLookYaw (-45..+45°)
+      - Map sensor.pitch (-30..+30°)  → cameraLookPitch (-30..+30°)
+    Rotate the look target around the camera position by
+    cameraLookYaw (horizontal pan) and cameraLookPitch (vertical).
+
+(b) CHASE MODE (existing branch, ~line 70):
+    NO CODE CHANGE — the chase camera already reads
+    sensor.yawHeading / sensor.pitch / sensor.tiltK.
+    Because setHardwareData() writes those fields, the chase
+    camera will orbit/change-height from real MPU6050
+    automatically. Just verify it behaves like the TiltPad.
+
+TOP-DOWN MODE: no change.
+
+--------------------------------------------------------------
+ CHANGE 5 — components/Controls.tsx
+--------------------------------------------------------------
+Replace the keyboard-input block (~line 36-76) to combine
+hardware buttons + keyboard, with hardware overriding when
+connected:
+
+  const hw = useHardwareStore.getState();
+  const connected = hw.connected;
+
+  // Hardware buttons
+  const hwThrottle = hw.buttons.throttle ? 1 : 0;
+  const hwBrake    = hw.buttons.brake    ? -1 : 0;
+  const hwLeft     = hw.buttons.left     ? 1 : 0;
+  const hwRight    = hw.buttons.right    ? 1 : 0;
+
+  // Keyboard (existing)
+  const kw = isKeyDown("KeyW"); ... etc
+
+  // Combined throttle
+  const keyThrottle = connected
+    ? (hwThrottle + hwBrake)
+    : (kw && ks ? 1 : kw ? 1 : ks ? -1 : 0);
+
+  // Combined steer
+  steer = connected
+    ? clamp((hwLeft ? 1 : 0) - (hwRight ? 1 : 0), -1, 1)
+    : clamp((ka ? 1 : 0) - (kd ? 1 : 0), -1, 1);
+
+  // E-Stop: when hw.buttons.estop transitions to true,
+  // latch AEB immediately (set aebLatched.current = true).
+
+IMPORTANT: The rest of Controls.tsx (physics, AEB, collision,
+gear, setFrame, wheel/body animation) stays UNCHANGED. The
+buttons only feed the SAME variables the keyboard used to write.
+
+--------------------------------------------------------------
+ CHANGE 6 — components/HUD.tsx
+--------------------------------------------------------------
+Add a hardware status badge next to the existing "AI LIVE" pill.
+Read from useHardwareStore.connected:
+    connected  →  "HW CONNECTED"  (green)
+    offline    →  "HW OFFLINE"    (grey)
+
+--------------------------------------------------------------
+ CHANGE 7 — Fallback logic
+--------------------------------------------------------------
+When hardware disconnects (change 1) the system should:
+  - Controls.tsx: connected=false → reverts to keyboard (logic above handles it)
+  - TiltPad: reappear if hidden while hardware was active
+  - CameraRig: no look-offset in cockpit (simStore stays at 0)
+  - HUD: show "HW OFFLINE"
+
+When ESP32 reconnects: connected=true → hardware takes over again.
+
+--------------------------------------------------------------
+ FILES NOT CHANGED (NO TOUCH)
+--------------------------------------------------------------
+  - lib/mlClient.ts          (ML telemetry — unchanged)
+  - lib/constants.ts         (unless adding ESP32 URL/constants)
+  - lib/keys.ts
+  - lib/rig.ts
+  - components/Dumper.tsx    (3D model — no change)
+  - components/Terrain.tsx
+  - components/Scene.tsx
+  - app/*
+  - ML Model/*               (see ML_CHANGES_REQUIRED.txt — likely none)
+
+--------------------------------------------------------------
+ DEMO SEQUENCE TO VALIDATE
+--------------------------------------------------------------
+1. Boot ESP32 → HUD shows "HW CONNECTED"
+2. Drive with WASD AND/OR physical buttons (both work)
+3. Press C twice → cockpit mode
+4. Tilt MPU6050 → camera look-around follows the board
+5. Press C once → chase mode → tilt orbits camera + changes height
+6. Press E-stop button → truck hard-brakes, HUD shows CRITICAL
+7. Power off ESP32 → graceful fallback to keyboard + virtual pad, "HW OFFLINE"
+8. Power on → auto-reconnect, "HW CONNECTED"
