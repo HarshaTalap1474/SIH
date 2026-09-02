@@ -1,254 +1,191 @@
-# GitHub Workflow
+---
+trigger: always_on
+---
 
-## Purpose
+# GitHub & Team Workflow
 
-This repository uses a **feature-branch workflow**.
+## 1. Purpose & Repository Architecture
 
-- `main` is the stable, tested branch.
-- No teammate or coding agent may push directly to `main`.
-- Each task is developed on its own branch.
-- The maintainer reviews, tests, and merges Pull Requests into `main`.
-- Coding agents such as Claude Code, OpenCode, Antigravity, and Codex must follow the same rules.
+This repository uses a **domain-isolated, multi-tier branch workflow** to support concurrent UI, ML, and Hardware development without merge conflicts.
+
+### Branch Hierarchy:
+
+```text
+main                               ──► 🔒 Production & Live Demo (Protected, Maintainer-only)
+ └── staging                       ──► 🧪 Pre-Release Deployment & Integration Testing
+      └── internal/prototype       ──► 🛠️ Main Prototype Hub (Integrates UI + ML + HD)
+           ├── internal/prototype-UI   ──► 🎨 UI Team (Next.js, Three.js, HUD, CSS)
+           ├── internal/prototype-ML   ──► 🧠 ML Team (TinyML, Python, Training, Inference)
+           └── internal/prototype-HD   ──► ⚡ Hardware Team (ESP32, Sensors, Telemetry)
+```
 
 ---
 
-## Branch Structure
+## 2. Golden Rules
 
-```text
-main
-├── feature/mapview
-├── feature/login
-├── feature/backend-api
-├── fix/camera-crash
-└── ...
-```
-
-Use task-based branch names:
-
-```text
-feature/<name>
-fix/<name>
-refactor/<name>
-chore/<name>
-```
-
-Do not normally use teammate names for branches.
+1. **Never work directly on `main`**: `main` is production-only.
+2. **Never push changes without authorization**: Always develop on your designated branch.
+3. **Stay in your assigned folder**:
+   - UI Team: `Internal Prototype/UI/`
+   - ML Team: `Internal Prototype/ML Model/`
+   - Hardware Team: `Internal Prototype/Hardware/`
+4. **Commit before pulling**: Always run `git add . && git commit -m "WIP"` before running `git pull`.
+5. **Never force-push (`git push --force`)**: This overwrites teammates' work.
+6. **Only the maintainer promotes to `staging` and `main`**.
 
 ---
 
-## Roles
+## 3. Team Roles
 
-### Maintainer
-
-The maintainer owns `main`.
-
-- Reviews Pull Requests.
-- Tests changes before merging.
-- Resolves or coordinates conflicts.
-- Keeps `main` stable and demo-ready.
+### Maintainer (Lead)
+- Owns `main`, `staging`, and `internal/prototype`.
+- Integrates domain sub-branches into `internal/prototype`.
+- Broadcasts synchronized prototype builds back to sub-branches.
+- Tests before promoting to `staging` or `main`.
 
 ### Teammates
+- Work exclusively on their assigned branch:
+  - UI Devs: `internal/prototype-UI`
+  - ML Devs: `internal/prototype-ML`
+  - Hardware Devs: `internal/prototype-HD`
+- Push progress to their respective branch and notify the maintainer.
 
-Teammates work only on their assigned feature/fix branches and submit Pull Requests.
-
-### Coding Agents
-
-Coding agents are treated like teammates.
-
-They must not modify or push to `main` directly unless explicitly authorized by the maintainer.
-
----
-
-## Starting a Task
-
-Always start from the latest `main`:
-
-```bash
-git switch main
-git pull origin main
-git switch -c feature/<feature-name>
-```
-
-Verify:
-
-```bash
-git branch --show-current
-git status
-```
+### Coding Agents (Antigravity, Claude Code, OpenCode, Codex)
+- Must follow the exact same rules as human teammates.
+- Must verify active branch with `git branch --show-current` before making changes.
+- Never push to any branch without explicit user confirmation.
 
 ---
 
-## Working
+## 4. Starting a Task
 
-Check changes regularly:
+### For UI Developers:
+```bash
+git switch internal/prototype-UI
+git pull origin internal/prototype-UI
+```
 
+### For ML Developers:
+```bash
+git switch internal/prototype-ML
+git pull origin internal/prototype-ML
+```
+
+### For Hardware Developers:
+```bash
+git switch internal/prototype-HD
+git pull origin internal/prototype-HD
+```
+
+### For Integrated Prototype (Lead):
+```bash
+git switch internal/prototype
+git pull origin internal/prototype
+```
+
+---
+
+## 5. Daily Working & Committing Routine
+
+### Step 1: Check status regularly
 ```bash
 git status
 git diff
 ```
 
-Keep changes focused on the assigned task.
-
-Commit meaningful progress:
-
+### Step 2: Commit meaningful progress
 ```bash
 git add .
-git commit -m "Add map coordinate transformation"
+git commit -m "feat(ui): add radar ray visualization"
 ```
 
-Push:
-
+### Step 3: Push to your assigned branch
 ```bash
-git push -u origin feature/<feature-name>
+git push origin <your-assigned-branch>
+```
+*(e.g., `git push origin internal/prototype-UI`)*
+
+---
+
+## 6. Synchronizing When Teammates Make Changes
+
+Before pulling latest updates from remote:
+
+1. **Save current local work first**:
+   ```bash
+   git add .
+   git commit -m "WIP: save local progress"
+   ```
+
+2. **Pull latest branch changes**:
+   ```bash
+   git pull origin <your-assigned-branch>
+   ```
+
+3. **If conflicts occur**:
+   - Open conflict files in VS Code.
+   - Choose the correct incoming/current changes.
+   - Save, commit, and push:
+     ```bash
+     git add .
+     git commit -m "fix(merge): resolve merge conflict"
+     git push origin <your-assigned-branch>
+     ```
+
+---
+
+## 7. Maintainer Integration Playbook
+
+### Task A: Merging a Teammate's Feature into `internal/prototype`
+```powershell
+git checkout internal/prototype
+git pull origin internal/prototype
+git merge origin/internal/prototype-UI
+git push origin internal/prototype
+```
+
+### Task B: Broadcasting Synchronized Updates to All Sub-Branches
+```powershell
+# UI Branch
+git checkout internal/prototype-UI
+git merge internal/prototype
+git push origin internal/prototype-UI
+
+# ML Branch
+git checkout internal/prototype-ML
+git merge internal/prototype
+git push origin internal/prototype-ML
+
+# Hardware Branch
+git checkout internal/prototype-HD
+git merge internal/prototype
+git push origin internal/prototype-HD
+
+# Return to Prototype Hub
+git checkout internal/prototype
+```
+
+### Task C: Promoting to `staging` and `main` (When Demo-Ready)
+```powershell
+# 1. Merge into Staging
+git checkout staging
+git merge internal/prototype
+git push origin staging
+
+# 2. Promote Staging to Main (Rebase for clean production log)
+git checkout main
+git rebase staging
+git push origin main
+
+# 3. Return to Prototype Hub
+git checkout internal/prototype
 ```
 
 ---
 
-## When `main` Has Changed
-
-Another teammate may merge changes while you are working.
-
-**Before pulling/merging `main`, save your current work in a commit.**
-
-```bash
-git add .
-git commit -m "WIP: save feature progress"
-```
-
-Then:
-
-```bash
-git fetch origin
-git merge origin/main
-```
-
-Your existing commits are preserved. Git combines your work with the latest `main`.
-
-If there are conflicts, resolve them on your feature branch, then:
-
-```bash
-git add .
-git commit
-```
-
-Test everything and push:
-
-```bash
-git push
-```
-
-### Important
-
-Do not replace your feature branch with `main`.
-
-The goal is:
-
-```text
-main:             A ── B
-                   feature/teammate:   P1 ── P2
-```
-
-After merging `main` into the feature branch:
-
-```text
-A ── B
-   P1 ── P2
-```
-
-Both sets of changes are retained unless a conflict requires a decision.
-
----
-
-## Pull Requests
-
-When ready:
-
-```text
-feature/<name> → main
-```
-
-The Pull Request should briefly state:
-
-- What changed.
-- How it was tested.
-- Any known issues.
-
-The maintainer reviews and tests the PR before merging.
-
-**Only the maintainer merges into `main`.**
-
----
-
-## Coding Agent Rules
-
-Before changing anything:
-
-```bash
-git branch --show-current
-git status --short
-```
-
-If on `main`, create or switch to the appropriate feature branch.
-
-Agents must:
-
-- Stay on the assigned branch.
-- Avoid unrelated changes.
-- Preserve existing teammate work.
-- Commit before synchronizing with `main`.
-- Test changes before declaring the task complete.
-- Push only the feature branch.
-- Never directly push to `main`.
-- Never expose or commit secrets such as `.env`, API keys, passwords, or tokens.
-
-### Dangerous commands
-
-Do not use these without explicit maintainer authorization:
-
-```bash
-git reset --hard
-git clean -fd
-git restore .
-git push --force
-git push --force-with-lease
-git branch -D
-```
-
-Never use destructive commands to "fix" a conflict without first protecting existing work.
-
----
-
-## Standard Workflow
-
-```text
-1. Pull latest main
-       ↓
-2. Create/switch feature branch
-       ↓
-3. Make changes
-       ↓
-4. Test
-       ↓
-5. Commit
-       ↓
-6. Push feature branch
-       ↓
-7. Create Pull Request
-       ↓
-8. Maintainer reviews + tests
-       ↓
-9. Maintainer merges into main
-       ↓
-10. Start next task from latest main
-```
-
-## Golden Rules
-
-1. **Never work directly on `main`.**
-2. **One task = one feature/fix branch.**
-3. **Commit before synchronizing with `main`.**
-4. **Merge `main` into your branch; don't replace your branch with `main`.**
-5. **Never overwrite another teammate's work.**
-6. **Never force-push without authorization.**
-7. **Only the maintainer merges into `main`.**
-8. **Test before merging.**
+## 8. Dangerous Commands (Strictly Forbidden Without Approval)
+- ❌ `git reset --hard`
+- ❌ `git clean -fd`
+- ❌ `git restore .`
+- ❌ `git push --force` or `git push -f`
+- ❌ `git branch -D`
