@@ -54,6 +54,18 @@ export class HardwareClient {
   private candidateIndex = 0;
   private isCustomUrl = false;
 
+  // MPU zero-tare offsets — captured by calling calibrate() while the board is flat
+  private zeroPitch = 0;
+  private zeroRoll = 0;
+
+  /** Call this while the MPU is resting flat to zero out mounting bias. */
+  public calibrate() {
+    const s = useSensor.getState();
+    this.zeroPitch = s.pitch;
+    this.zeroRoll = s.roll;
+    console.log(`[Hardware] MPU tare — zeroPitch=${this.zeroPitch.toFixed(2)}°, zeroRoll=${this.zeroRoll.toFixed(2)}°`);
+  }
+
   public init() {
     if (typeof window === "undefined") return;
     this.connect();
@@ -93,9 +105,16 @@ export class HardwareClient {
           const data = JSON.parse(event.data);
 
           if (data.mpu) {
+            const rawPitch = Number(data.mpu.pitch) || 0;
+            const rawRoll  = Number(data.mpu.roll)  || 0;
+
+            // Apply zero-tare offsets (removes mounting bias)
+            const pitch = rawPitch - this.zeroPitch;
+            const roll  = rawRoll  - this.zeroRoll;
+
             useSensor.getState().setHardwareData({
-              pitch: Number(data.mpu.pitch) || 0,
-              roll: Number(data.mpu.roll) || 0,
+              pitch,
+              roll,
               yaw: Number(data.mpu.yaw) || 0,
               ax: Number(data.mpu.ax) || 0,
               ay: Number(data.mpu.ay) || 0,
@@ -103,13 +122,9 @@ export class HardwareClient {
               anomaly: Boolean(data.mpu.anomaly),
             });
 
-            // Map MPU roll/pitch to cockpit look offsets
-            // Roll (-30..+30°) -> Camera Look Yaw (-45..+45°)
-            // Pitch (-30..+30°) -> Camera Look Pitch (-30..+30°)
-            const roll = Number(data.mpu.roll) || 0;
-            const pitch = Number(data.mpu.pitch) || 0;
-            const lookYaw = Math.max(-45, Math.min(45, (roll / 30) * 45));
-            const lookPitch = Math.max(-30, Math.min(30, pitch));
+            // Camera look: ±15° tilt -> ±30° yaw, ±20° pitch (tighter for mine cab realism)
+            const lookYaw   = Math.max(-30, Math.min(30, (roll  / 15) * 30));
+            const lookPitch = Math.max(-20, Math.min(20, (pitch / 15) * 20));
             useSim.getState().setCameraLook(lookYaw, lookPitch);
           }
 

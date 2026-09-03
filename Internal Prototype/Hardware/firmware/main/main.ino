@@ -165,7 +165,7 @@ bool readMpu(float acc[3], float gyro[3]) {
 }
 
 // Calibrate gyro bias: sample N readings while stationary
-void calibrateGyro(int samples = 200) {
+void calibrateGyro(int samples = 300) {
   float a[3], g[3];
   float sx = 0, sy = 0, sz = 0;
   int n = 0;
@@ -337,8 +337,8 @@ void loop() {
                           sqrt(acc[1] * acc[1] +
                                acc[2] * acc[2])) * 180.0f / PI;
 
-  // Complementary filter (alpha 0.98)
-  const float alpha = 0.98f;
+  // Complementary filter (alpha 0.96 — slightly faster accel correction)
+  const float alpha = 0.96f;
   roll  = alpha * (roll  + gx * dt) + (1.0f - alpha) * accelRoll;
   pitch = alpha * (pitch + gy * dt) + (1.0f - alpha) * accelPitch;
   yaw  += gz * dt; // relative yaw (drifts without magnetometer)

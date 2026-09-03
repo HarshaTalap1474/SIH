@@ -18,6 +18,7 @@ export function Controls() {
   const spinAngle = useRef(0);
   const joltVis = useRef(0);
   const aebLatched = useRef(false);
+  const estopLatched = useRef(false); // physical E-Stop — only clears on HW disconnect
   const prevEstop = useRef(false);
 
   useEffect(() => {
@@ -39,9 +40,9 @@ export function Controls() {
     const hw = useHardwareStore.getState();
     const connected = hw.connected;
 
-    // Hardware buttons
+    // Hardware buttons — boost = BOTH throttle AND brake held simultaneously
     const hwThrottle = hw.buttons.throttle ? 1 : 0;
-    const hwBrake = hw.buttons.brake ? -1 : 0;
+    const hwBrakeOnly = hw.buttons.brake && !hw.buttons.throttle ? -1 : 0;
     const hwLeft = hw.buttons.left ? 1 : 0;
     const hwRight = hw.buttons.right ? 1 : 0;
 
@@ -56,9 +57,9 @@ export function Controls() {
     if (connected) {
       if (hw.buttons.throttle && hw.buttons.brake) {
         boost = true;
-        keyThrottle = 1;
+        keyThrottle = 1; // boost: both held
       } else {
-        keyThrottle = hwThrottle + hwBrake;
+        keyThrottle = hwThrottle + hwBrakeOnly;
       }
     } else {
       if (w && s) {
@@ -73,29 +74,33 @@ export function Controls() {
       ? clamp((hwLeft ? 1 : 0) - (hwRight ? 1 : 0), -1, 1)
       : clamp((a ? 1 : 0) - (d ? 1 : 0), -1, 1);
 
-    // E-Stop: when hw.buttons.estop transitions to true, latch AEB immediately
+    // E-Stop: rising edge of hw.buttons.estop -> latch INDEPENDENTLY of obstacles
     if (connected && hw.buttons.estop && !prevEstop.current) {
+      estopLatched.current = true;
       aebLatched.current = true;
+    }
+    // Release E-Stop only when HW disconnects or user manually reverses out
+    if (!connected) {
+      estopLatched.current = false;
     }
     prevEstop.current = connected ? hw.buttons.estop : false;
 
     // Active Reversing condition (driver pressing 'S'/brake or moving backward)
     const isReversing = keyThrottle < 0 || (speed < -0.05 && keyThrottle <= 0);
 
-    // AEB Latch: If emergency brake triggers OR obstacle is within 4.8m in front of bumper
+    // AEB from obstacle detection (only when not reversing)
     if (adas.emergencyBrake || adas.closestObstacleM < 4.8) {
       if (!isReversing) {
         aebLatched.current = true;
       }
     }
 
-    // Release AEB Latch when:
-    // 1. Driver has reversed away or steered so clearance opens up (> 6.0m)
-    // 2. OR driver is actively in reverse
-    if (adas.closestObstacleM > 6.0 && !adas.emergencyBrake) {
+    // Release obstacle AEB only (NOT E-Stop) when clearance opens and not emergency brake
+    if (!estopLatched.current && adas.closestObstacleM > 6.0 && !adas.emergencyBrake) {
       aebLatched.current = false;
     }
-    if (isReversing && speed < -0.05) {
+    // Allow reverse to escape (but only if E-Stop is not latched)
+    if (!estopLatched.current && isReversing && speed < -0.05) {
       aebLatched.current = false;
     }
 

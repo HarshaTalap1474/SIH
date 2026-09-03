@@ -88,7 +88,7 @@ export function HUD() {
                   hwClient.setCustomUrl(next.trim());
                 }
               }}
-              title={`ESP32 Target: ${useHardwareStore.getState().esp32Ip}\nClick to view/change`}
+              title={`ESP32 Target: ${useHardwareStore.getState().esp32Ip}\nClick to change URL`}
               className={`pointer-events-auto cursor-pointer flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider uppercase border transition-all ${
                 hwConnected
                   ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.3)] hover:bg-emerald-500/25"
@@ -102,6 +102,21 @@ export function HUD() {
               />
               {hwConnected ? "HW CONNECTED" : "HW OFFLINE"}
             </button>
+
+            {/* MPU Calibrate button — only show when hardware is connected */}
+            {hwConnected && (
+              <button
+                type="button"
+                onClick={() => {
+                  hwClient.calibrate();
+                  window.alert("MPU tared ✓  — board is now zeroed to current orientation.");
+                }}
+                title="Tare MPU6050: zero pitch & roll to current orientation"
+                className="pointer-events-auto cursor-pointer flex items-center gap-1 rounded-full px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider uppercase border border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 transition-all"
+              >
+                ⊕ CAL MPU
+              </button>
+            )}
 
             {/* AI Connection Status Pill */}
             <div
