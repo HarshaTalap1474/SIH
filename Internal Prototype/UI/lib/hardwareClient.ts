@@ -107,8 +107,11 @@ export class HardwareClient {
           if (data.mpu) {
             const rawPitch = Number(data.mpu.pitch) || 0;
             const rawRoll  = Number(data.mpu.roll)  || 0;
+            const ax = Number(data.mpu.ax) || 0;
+            const ay = Number(data.mpu.ay) || 0;
+            const az = Number(data.mpu.az) || 0;
 
-            // Apply zero-tare offsets (removes mounting bias)
+            // Apply zero-tare offsets (removes mounting bias) for sensor store
             const pitch = rawPitch - this.zeroPitch;
             const roll  = rawRoll  - this.zeroRoll;
 
@@ -116,15 +119,21 @@ export class HardwareClient {
               pitch,
               roll,
               yaw: Number(data.mpu.yaw) || 0,
-              ax: Number(data.mpu.ax) || 0,
-              ay: Number(data.mpu.ay) || 0,
-              az: Number(data.mpu.az) || 0,
+              ax,
+              ay,
+              az,
               anomaly: Boolean(data.mpu.anomaly),
             });
 
-            // Camera look: ±15° tilt -> ±30° yaw, ±20° pitch (tighter for mine cab realism)
-            const lookYaw   = Math.max(-30, Math.min(30, (roll  / 15) * 30));
-            const lookPitch = Math.max(-20, Math.min(20, (pitch / 15) * 20));
+            // Camera look: use drift-free accel-only angles (atan2 on raw g-vectors).
+            // These NEVER accumulate gyro error — they always track true physical tilt.
+            // Apply the same zero-tare offsets so CAL MPU recentres the camera too.
+            const accelRoll  = Math.atan2(ay, az) * (180 / Math.PI) - this.zeroRoll;
+            const accelPitch = Math.atan2(-ax, Math.sqrt(ay * ay + az * az)) * (180 / Math.PI) - this.zeroPitch;
+
+            // ±15° physical tilt -> ±30° camera yaw, ±20° camera pitch
+            const lookYaw   = Math.max(-30, Math.min(30, (accelRoll  / 15) * 30));
+            const lookPitch = Math.max(-20, Math.min(20, (accelPitch / 15) * 20));
             useSim.getState().setCameraLook(lookYaw, lookPitch);
           }
 
