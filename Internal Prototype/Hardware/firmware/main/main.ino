@@ -40,7 +40,7 @@
 #include <WebSocketsServer.h>
 
 // ---------------- USER CONFIG ----------------
-const char* WIFI_SSID     = "Floor_1";
+const char* WIFI_SSID     = "FLOOR-1";
 const char* WIFI_PASSWORD = "Suraj@123";
 const char* AP_NAME       = "ESP32-MINE-ADAS";
 
