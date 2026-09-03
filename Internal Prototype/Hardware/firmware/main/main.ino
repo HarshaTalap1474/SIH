@@ -38,11 +38,12 @@
 #include <WiFi.h>
 #include <Wire.h>
 #include <WebSocketsServer.h>
+#include <WiFiManager.h>  // Install 'WiFiManager' by tzapu via Library Manager
+#include <ESPmDNS.h>      // Built-in ESP32 mDNS responder
 
 // ---------------- USER CONFIG ----------------
-const char* WIFI_SSID     = "FLOOR-1";
-const char* WIFI_PASSWORD = "Suraj@123";
 const char* AP_NAME       = "ESP32-MINE-ADAS";
+const char* MDNS_HOST     = "esp32-adas";
 
 #define WS_PORT 81
 #define WS_PATH "/ws"
@@ -83,6 +84,12 @@ float pitch = 0, roll = 0, yaw = 0;
 unsigned long lastUpdate = 0;
 
 WebSocketsServer webSocket = WebSocketsServer(WS_PORT);
+
+// ---------------- Double-Reset Detection (RTC survives RST, not power-off) ----------------
+// Press RST twice within 3 seconds -> wipes saved Wi-Fi and opens tzapu portal.
+#define DRD_TIMEOUT_MS 3000
+RTC_DATA_ATTR bool drdFlag = false;
+RTC_DATA_ATTR uint32_t drdTimestamp = 0;
 
 // Simple software debounce state
 static bool lastBtn[5] = {false, false, false, false, false};
@@ -244,30 +251,58 @@ void setup() {
   delay(500);
   calibrateGyro(); // << must be still & level
 
-  // WiFi: STA first, fall back to AP
-  Serial.println("[WIFI] Connecting to STA network...");
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  unsigned long t0 = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 10000) {
-    delay(200);
+  // ---------------- Double-Reset: Press RST twice within 3s to wipe Wi-Fi ----------------
+  uint32_t now_ms = millis();
+  if (drdFlag && (now_ms - drdTimestamp) < DRD_TIMEOUT_MS) {
+    // Second reset detected within the window
+    drdFlag = false;
+    Serial.println("[DRD] Double-reset detected! Wiping saved Wi-Fi credentials...");
+    WiFiManager wm_reset;
+    wm_reset.resetSettings();
+    Serial.println("[DRD] Credentials wiped. Opening portal...");
+  } else {
+    // First reset — arm the flag with current timestamp
+    drdFlag = true;
+    drdTimestamp = now_ms;
   }
 
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.printf("[WIFI] Connected. IP: %s\n", WiFi.localIP().toString().c_str());
+  // Clear the flag after 3s (happens naturally in loop after boot completes)
+
+  // ---------------- WiFi Setup (WiFiManager + mDNS + AP Fallback) ----------------
+  // ESP32-C3 fix: force AP+STA mode BEFORE WiFiManager so the AP beacon is always visible
+  WiFi.mode(WIFI_AP_STA);
+
+  WiFiManager wm;
+  wm.setConfigPortalTimeout(180);
+
+  Serial.println("[WIFI] Starting tzapu WiFiManager portal ('ESP32-MINE-ADAS')...");
+  bool connected = wm.autoConnect(AP_NAME);
+
+  drdFlag = false; // Disarm: boot completed normally, no second reset within window
+
+  if (connected) {
+    Serial.printf("[WIFI] Connected to network. IP: %s\n", WiFi.localIP().toString().c_str());
   } else {
-    Serial.println("[WIFI] STA failed -> starting AP");
+    Serial.println("[WIFI] Portal timed out or connection failed -> starting standalone AP");
     WiFi.mode(WIFI_AP);
     WiFi.softAP(AP_NAME);
     delay(100);
-    Serial.printf("[WIFI] AP started. IP: %s\n", WiFi.softAPIP().toString().c_str());
+    Serial.printf("[WIFI] Standalone AP active. IP: %s\n", WiFi.softAPIP().toString().c_str());
+  }
+
+  // ---------------- mDNS Zero-Config Registration ----------------
+  if (MDNS.begin(MDNS_HOST)) {
+    Serial.printf("[mDNS] Active! Hostname: ws://%s.local:%d%s\n", MDNS_HOST, WS_PORT, WS_PATH);
+    MDNS.addService("ws", "tcp", WS_PORT);
+  } else {
+    Serial.println("[mDNS] Error setting up MDNS responder!");
   }
 
   webSocket.begin();
   webSocket.onEvent(webSocketEvent);
-  Serial.printf("[WS] Server on ws://%s:%d%s\n",
+  Serial.printf("[WS] Server ready on ws://%s:%d%s (or ws://%s.local:%d%s)\n",
     (WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : WiFi.softAPIP().toString()).c_str(),
-    WS_PORT, WS_PATH);
+    WS_PORT, WS_PATH, MDNS_HOST, WS_PORT, WS_PATH);
 
   lastUpdate = millis();
   Serial.println("[HW] Ready. Broadcasting MPU + buttons @50Hz.");
