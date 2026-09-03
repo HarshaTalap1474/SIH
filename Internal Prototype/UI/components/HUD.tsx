@@ -85,12 +85,10 @@ export function HUD() {
                 const current = useHardwareStore.getState().esp32Ip;
                 const next = window.prompt("ESP32 WebSocket URL:", current);
                 if (next && next.trim()) {
-                  useHardwareStore.getState().setEsp32Ip(next.trim());
-                  hwClient.disconnect();
-                  hwClient.connect();
+                  hwClient.setCustomUrl(next.trim());
                 }
               }}
-              title="Click to view/change ESP32 WebSocket URL"
+              title={`ESP32 Target: ${useHardwareStore.getState().esp32Ip}\nClick to view/change`}
               className={`pointer-events-auto cursor-pointer flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider uppercase border transition-all ${
                 hwConnected
                   ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.3)] hover:bg-emerald-500/25"

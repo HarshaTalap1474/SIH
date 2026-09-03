@@ -22,10 +22,16 @@ export interface HardwareState {
   setEsp32Ip: (ip: string) => void;
 }
 
+const CANDIDATE_ENDPOINTS = [
+  process.env.NEXT_PUBLIC_ESP32_WS || "ws://esp32-adas.local:81/ws",
+  "ws://192.168.0.103:81/ws",
+  "ws://192.168.4.1:81/ws",
+];
+
 export const useHardwareStore = create<HardwareState>()((set) => ({
   connected: false,
   lastSeen: 0,
-  esp32Ip: process.env.NEXT_PUBLIC_ESP32_WS || "ws://192.168.0.103:81/ws",
+  esp32Ip: process.env.NEXT_PUBLIC_ESP32_WS || "ws://esp32-adas.local:81/ws",
   buttons: {
     throttle: false,
     brake: false,
@@ -45,9 +51,18 @@ export class HardwareClient {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private watchdogTimer: NodeJS.Timeout | null = null;
   private shouldConnect = false;
+  private candidateIndex = 0;
+  private isCustomUrl = false;
 
   public init() {
     if (typeof window === "undefined") return;
+    this.connect();
+  }
+
+  public setCustomUrl(url: string) {
+    this.isCustomUrl = true;
+    useHardwareStore.getState().setEsp32Ip(url);
+    this.disconnect();
     this.connect();
   }
 
@@ -56,7 +71,11 @@ export class HardwareClient {
     if (this.ws || this.isConnecting) return;
     this.isConnecting = true;
 
-    const url = useHardwareStore.getState().esp32Ip;
+    const url = this.isCustomUrl
+      ? useHardwareStore.getState().esp32Ip
+      : CANDIDATE_ENDPOINTS[this.candidateIndex % CANDIDATE_ENDPOINTS.length];
+
+    useHardwareStore.getState().setEsp32Ip(url);
 
     try {
       this.ws = new WebSocket(url);
@@ -112,6 +131,9 @@ export class HardwareClient {
 
       this.ws.onclose = () => {
         this.cleanupConnection();
+        if (!this.isCustomUrl) {
+          this.candidateIndex = (this.candidateIndex + 1) % CANDIDATE_ENDPOINTS.length;
+        }
         this.scheduleReconnect();
       };
 
@@ -122,6 +144,9 @@ export class HardwareClient {
       };
     } catch {
       this.cleanupConnection();
+      if (!this.isCustomUrl) {
+        this.candidateIndex = (this.candidateIndex + 1) % CANDIDATE_ENDPOINTS.length;
+      }
       this.scheduleReconnect();
     }
   }
