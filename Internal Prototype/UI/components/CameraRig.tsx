@@ -55,9 +55,26 @@ export function CameraRig() {
       // Look forward along haul road with dynamic look-ahead into turns
       const lookDist = 35;
       const steerLookAhead = sim.steer * 4.5;
-      lx = tx + fwdX * lookDist + rightX * steerLookAhead;
-      ly = 2.2; // slight downward gaze towards road surface
-      lz = tz + fwdZ * lookDist + rightZ * steerLookAhead;
+      const baseLx = tx + fwdX * lookDist + rightX * steerLookAhead;
+      const baseLy = 2.2; // slight downward gaze towards road surface
+      const baseLz = tz + fwdZ * lookDist + rightZ * steerLookAhead;
+
+      // Apply MPU6050 look offsets in cockpit mode
+      if (sim.cameraLookYaw !== 0 || sim.cameraLookPitch !== 0) {
+        const lookDir = new THREE.Vector3(baseLx - tx, baseLy - ty, baseLz - tz);
+        // Horizontal pan around vertical axis
+        lookDir.applyAxisAngle(new THREE.Vector3(0, 1, 0), -sim.cameraLookYaw * DEG);
+        // Vertical pitch around cabin lateral right vector
+        const rightVec = new THREE.Vector3(rightX, 0, rightZ).normalize();
+        lookDir.applyAxisAngle(rightVec, sim.cameraLookPitch * DEG);
+        lx = tx + lookDir.x;
+        ly = ty + lookDir.y;
+        lz = tz + lookDir.z;
+      } else {
+        lx = baseLx;
+        ly = baseLy;
+        lz = baseLz;
+      }
 
       // Subtle engine vibration in cabin
       const clock = performance.now() / 1000;

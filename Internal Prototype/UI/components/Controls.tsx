@@ -8,6 +8,7 @@ import { useSensor } from "@/lib/virtualSensor";
 import { useSim, GearMode } from "@/lib/simStore";
 import { rigParts } from "@/lib/rig";
 import { adasClient, useAdasStore } from "@/lib/mlClient";
+import { hwClient, useHardwareStore } from "@/lib/hardwareClient";
 
 export function Controls() {
   const prevSpeed = useRef(0);
@@ -17,9 +18,11 @@ export function Controls() {
   const spinAngle = useRef(0);
   const joltVis = useRef(0);
   const aebLatched = useRef(false);
+  const prevEstop = useRef(false);
 
   useEffect(() => {
     adasClient.init();
+    hwClient.init();
   }, []);
 
   useFrame((state, rawDt) => {
@@ -33,6 +36,16 @@ export function Controls() {
     adasClient.update(x, z, yaw, speed, steer);
     const adas = useAdasStore.getState();
 
+    const hw = useHardwareStore.getState();
+    const connected = hw.connected;
+
+    // Hardware buttons
+    const hwThrottle = hw.buttons.throttle ? 1 : 0;
+    const hwBrake = hw.buttons.brake ? -1 : 0;
+    const hwLeft = hw.buttons.left ? 1 : 0;
+    const hwRight = hw.buttons.right ? 1 : 0;
+
+    // Keyboard (existing)
     const w = isKeyDown("KeyW");
     const s = isKeyDown("KeyS");
     const a = isKeyDown("KeyA");
@@ -40,13 +53,33 @@ export function Controls() {
 
     let keyThrottle = 0;
     boost = false;
-    if (w && s) {
-      boost = true;
-      keyThrottle = 1;
-    } else if (w) keyThrottle = 1;
-    else if (s) keyThrottle = -1;
+    if (connected) {
+      if (hw.buttons.throttle && hw.buttons.brake) {
+        boost = true;
+        keyThrottle = 1;
+      } else {
+        keyThrottle = hwThrottle + hwBrake;
+      }
+    } else {
+      if (w && s) {
+        boost = true;
+        keyThrottle = 1;
+      } else if (w) keyThrottle = 1;
+      else if (s) keyThrottle = -1;
+    }
 
-    // Active Reversing condition (driver pressing 'S' or moving backward)
+    // Combined steer
+    steer = connected
+      ? clamp((hwLeft ? 1 : 0) - (hwRight ? 1 : 0), -1, 1)
+      : clamp((a ? 1 : 0) - (d ? 1 : 0), -1, 1);
+
+    // E-Stop: when hw.buttons.estop transitions to true, latch AEB immediately
+    if (connected && hw.buttons.estop && !prevEstop.current) {
+      aebLatched.current = true;
+    }
+    prevEstop.current = connected ? hw.buttons.estop : false;
+
+    // Active Reversing condition (driver pressing 'S'/brake or moving backward)
     const isReversing = keyThrottle < 0 || (speed < -0.05 && keyThrottle <= 0);
 
     // AEB Latch: If emergency brake triggers OR obstacle is within 4.8m in front of bumper
@@ -72,8 +105,6 @@ export function Controls() {
     if (isBlockedAhead && throttle > 0) {
       throttle = 0; // Cut forward throttle completely
     }
-
-    steer = clamp((a ? 1 : 0) - (d ? 1 : 0), -1, 1);
 
     const maxSpeed = boost
       ? PHYSICS.boostMaxSpeed

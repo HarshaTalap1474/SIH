@@ -39,6 +39,15 @@ interface SensorState {
   triggerImpact: (strength: number) => void;
   clearTilt: () => void;
   setSource: (source: SensorSource) => void;
+  setHardwareData: (data: {
+    pitch: number;
+    roll: number;
+    yaw: number;
+    ax: number;
+    ay: number;
+    az: number;
+    anomaly: boolean;
+  }) => void;
   tick: (dt: number) => void;
 }
 
@@ -104,8 +113,48 @@ export const useSensor = create<SensorState>()((set, get) => ({
 
   setSource: (source) => set({ source }),
 
+  setHardwareData: (data) => {
+    const tiltK = Math.min(Math.hypot(data.pitch, data.roll) / 30, 1);
+    set({
+      pitch: data.pitch,
+      roll: data.roll,
+      yawHeading: data.yaw,
+      tiltK,
+      ax: data.ax,
+      ay: data.ay,
+      az: data.az,
+      roadAnomaly: data.anomaly,
+      source: "hardware",
+      active: true,
+    });
+  },
+
   tick: (dt) => {
     const s = get();
+
+    if (s.source === "hardware") {
+      const gx = dt > 0 ? (s.roll - s.lastRoll) / dt : 0;
+      const gy = dt > 0 ? (s.pitch - s.lastPitch) / dt : 0;
+      const gz = dt > 0 ? angleDelta(s.yawHeading, s.lastYaw) / dt : 0;
+
+      const impact =
+        s.impact > 0.001 ? s.impact * Math.exp(-SENSOR.impactDecay * dt) : 0;
+      const roadAnomaly = s.roadAnomaly || impact > SENSOR.anomalyThresholdG;
+
+      set({
+        gx,
+        gy,
+        gz,
+        impact,
+        roadAnomaly,
+        lastRoll: s.roll,
+        lastPitch: s.pitch,
+        lastYaw: s.yawHeading,
+        t: s.t + dt,
+      });
+      return;
+    }
+
     // If sensor is inactive and at rest, avoid triggering React re-render budget
     if (
       !s.active &&

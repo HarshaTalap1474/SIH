@@ -17,6 +17,8 @@ interface SimStore {
   gear: GearMode;
   headlights: boolean;
   fogMode: FogMode;
+  cameraLookYaw: number;
+  cameraLookPitch: number;
   setFrame: (s: {
     x: number;
     z: number;
@@ -30,6 +32,7 @@ interface SimStore {
   setCamMode: (mode: CamMode) => void;
   toggleHeadlights: () => void;
   toggleFog: () => void;
+  setCameraLook: (yaw: number, pitch: number) => void;
   resetSim: () => void;
 }
 
@@ -45,6 +48,8 @@ export const useSim = create<SimStore>()((set) => ({
   gear: "P",
   headlights: true,
   fogMode: "heavy",
+  cameraLookYaw: 0,
+  cameraLookPitch: 0,
 
   setFrame: ({ x, z, yaw, speed, steer, boost, gear: passedGear }) => {
     const speedKmh = Math.round(Math.abs(speed) * PHYSICS.kphPerUnit);
@@ -86,6 +91,9 @@ export const useSim = create<SimStore>()((set) => ({
       return { fogMode: modes[nextIdx] };
     }),
 
+  setCameraLook: (cameraLookYaw, cameraLookPitch) =>
+    set({ cameraLookYaw, cameraLookPitch }),
+
   resetSim: () =>
     set({
       x: START_POS.x,
@@ -96,5 +104,7 @@ export const useSim = create<SimStore>()((set) => ({
       boost: false,
       speedKmh: 0,
       gear: "N",
+      cameraLookYaw: 0,
+      cameraLookPitch: 0,
     }),
 }));

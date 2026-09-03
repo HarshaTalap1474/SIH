@@ -3,11 +3,13 @@
 import { useCallback, useRef, useState } from "react";
 import { SENSOR } from "@/lib/constants";
 import { useSensor } from "@/lib/virtualSensor";
+import { useHardwareStore } from "@/lib/hardwareClient";
 
 const PAD_SIZE = SENSOR.padRadiusPx * 2;
 const PAD_RADIUS = SENSOR.padRadiusPx;
 
 export function TiltPad() {
+  const hwConnected = useHardwareStore((s) => s.connected);
   const roll = useSensor((s) => s.roll);
   const pitch = useSensor((s) => s.pitch);
   const yawHeading = useSensor((s) => s.yawHeading);
@@ -56,6 +58,8 @@ export function TiltPad() {
 
   const px = (cursor.x / PAD_RADIUS) * (PAD_RADIUS - 20);
   const py = (cursor.y / PAD_RADIUS) * (PAD_RADIUS - 20);
+
+  if (hwConnected) return null;
 
   return (
     <div className="fixed bottom-4 right-4 z-30 flex select-none flex-col items-end gap-1.5">

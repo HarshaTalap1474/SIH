@@ -3,6 +3,7 @@
 import { useSim } from "@/lib/simStore";
 import { useSensor } from "@/lib/virtualSensor";
 import { useAdasStore } from "@/lib/mlClient";
+import { useHardwareStore, hwClient } from "@/lib/hardwareClient";
 
 export function HUD() {
   const speedKmh = useSim((s) => s.speedKmh);
@@ -25,6 +26,7 @@ export function HUD() {
 
   // ADAS Store
   const connected = useAdasStore((s) => s.connected);
+  const hwConnected = useHardwareStore((s) => s.connected);
   const risk = useAdasStore((s) => s.collisionRisk);
   const emergencyBrake = useAdasStore((s) => s.emergencyBrake);
   const closestObstacleM = useAdasStore((s) => s.closestObstacleM);
@@ -74,20 +76,50 @@ export function HUD() {
             </div>
           </div>
 
-          {/* AI Connection Status Pill */}
-          <div
-            className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider uppercase border transition-all ${
-              connected
-                ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.3)]"
-                : "bg-zinc-800/60 border-white/10 text-zinc-400"
-            }`}
-          >
-            <span
-              className={`h-1.5 w-1.5 rounded-full ${
-                connected ? "bg-emerald-400 shadow-[0_0_6px_#34d399]" : "bg-zinc-500"
+          {/* Connection Status Pills */}
+          <div className="flex items-center gap-1.5">
+            {/* HW Connection Status Pill */}
+            <button
+              type="button"
+              onClick={() => {
+                const current = useHardwareStore.getState().esp32Ip;
+                const next = window.prompt("ESP32 WebSocket URL:", current);
+                if (next && next.trim()) {
+                  useHardwareStore.getState().setEsp32Ip(next.trim());
+                  hwClient.disconnect();
+                  hwClient.connect();
+                }
+              }}
+              title="Click to view/change ESP32 WebSocket URL"
+              className={`pointer-events-auto cursor-pointer flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider uppercase border transition-all ${
+                hwConnected
+                  ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.3)] hover:bg-emerald-500/25"
+                  : "bg-zinc-800/60 border-white/10 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
               }`}
-            />
-            {connected ? "AI LIVE" : "LOCAL ADAS"}
+            >
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  hwConnected ? "bg-emerald-400 shadow-[0_0_6px_#34d399]" : "bg-zinc-500"
+                }`}
+              />
+              {hwConnected ? "HW CONNECTED" : "HW OFFLINE"}
+            </button>
+
+            {/* AI Connection Status Pill */}
+            <div
+              className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider uppercase border transition-all ${
+                connected
+                  ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.3)]"
+                  : "bg-zinc-800/60 border-white/10 text-zinc-400"
+              }`}
+            >
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  connected ? "bg-emerald-400 shadow-[0_0_6px_#34d399]" : "bg-zinc-500"
+                }`}
+              />
+              {connected ? "AI LIVE" : "LOCAL ADAS"}
+            </div>
           </div>
         </div>
       </div>
