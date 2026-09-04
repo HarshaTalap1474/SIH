@@ -3,15 +3,6 @@ import { SENSOR } from "./constants";
 
 export type SensorSource = "virtual-pad" | "hardware";
 
-export interface MpuPayload {
-  mpu6050: {
-    accel_g: { x: number; y: number; z: number };
-    gyro_deg_per_sec: { x: number; y: number; z: number };
-    orientation_deg: { pitch: number; roll: number; yaw_heading: number };
-    road_anomaly_detected: boolean;
-  };
-}
-
 interface SensorState {
   roll: number;
   pitch: number;
@@ -35,10 +26,7 @@ interface SensorState {
   roadAnomaly: boolean;
   source: SensorSource;
   active: boolean;
-  setTiltFromPad: (dx: number, dy: number) => void;
   triggerImpact: (strength: number) => void;
-  clearTilt: () => void;
-  setSource: (source: SensorSource) => void;
   setHardwareData: (data: {
     pitch: number;
     roll: number;
@@ -57,15 +45,6 @@ const angleDelta = (a: number, b: number) => {
   if (d < -180) d += 360;
   return d;
 };
-
-export const buildMpuPayload = (s: SensorState): MpuPayload => ({
-  mpu6050: {
-    accel_g: { x: s.ax, y: s.ay, z: s.az },
-    gyro_deg_per_sec: { x: s.gx, y: s.gy, z: s.gz },
-    orientation_deg: { pitch: s.pitch, roll: s.roll, yaw_heading: s.yawHeading },
-    road_anomaly_detected: s.roadAnomaly,
-  },
-});
 
 export const useSensor = create<SensorState>()((set, get) => ({
   roll: 0,
@@ -91,27 +70,8 @@ export const useSensor = create<SensorState>()((set, get) => ({
   source: "virtual-pad",
   active: false,
 
-  setTiltFromPad: (dx, dy) => {
-    const ry = -dy;
-    const r = Math.hypot(dx, ry);
-    const k = Math.min(r / SENSOR.padRadiusPx, 1);
-    const theta = Math.atan2(ry, dx);
-    set({
-      targetRoll: k * Math.cos(theta) * SENSOR.maxRollDeg,
-      targetPitch: k * Math.sin(theta) * SENSOR.maxPitchDeg,
-      targetYaw: ((theta * 180) / Math.PI + 360) % 360,
-      targetK: k,
-      active: true,
-    });
-  },
-
   triggerImpact: (strength) =>
     set((s) => ({ impact: Math.min(s.impact + strength, 4) })),
-
-  clearTilt: () =>
-    set({ targetRoll: 0, targetPitch: 0, targetYaw: 0, targetK: 0, active: false }),
-
-  setSource: (source) => set({ source }),
 
   setHardwareData: (data) => {
     const tiltK = Math.min(Math.hypot(data.pitch, data.roll) / 30, 1);
@@ -155,7 +115,6 @@ export const useSensor = create<SensorState>()((set, get) => ({
       return;
     }
 
-    // If sensor is inactive and at rest, avoid triggering React re-render budget
     if (
       !s.active &&
       s.impact < 0.001 &&
@@ -168,7 +127,6 @@ export const useSensor = create<SensorState>()((set, get) => ({
     }
 
     const k = 1 - Math.exp(-SENSOR.smooth * dt);
-
     const roll = s.roll + (s.targetRoll - s.roll) * k;
     const pitch = s.pitch + (s.targetPitch - s.pitch) * k;
     const yawHeading = s.yawHeading + angleDelta(s.targetYaw, s.yawHeading) * k;

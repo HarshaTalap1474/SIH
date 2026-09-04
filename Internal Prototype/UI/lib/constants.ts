@@ -78,8 +78,6 @@ export const SCENE = {
   cameraStart: { x: 0, y: 6, z: 8 },
 } as const;
 
-export const LOOP = { x: 0, z: -80, radius: 26, width: 9 } as const;
-
 export const PIT_BENCHES = [
   { r: 125, h: 6, color: "#3d2216", topColor: "#4e2b1c" },
   { r: 140, h: 12, color: "#361e13", topColor: "#452618" },

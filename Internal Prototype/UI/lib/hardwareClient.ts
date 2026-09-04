@@ -2,7 +2,6 @@
 
 import { create } from "zustand";
 import { useSensor } from "./virtualSensor";
-import { useSim } from "./simStore";
 
 export interface HardwareButtons {
   throttle: boolean;
@@ -14,6 +13,7 @@ export interface HardwareButtons {
 
 export interface HardwareState {
   connected: boolean;
+  connecting: boolean;
   lastSeen: number;
   esp32Ip: string;
   buttons: HardwareButtons;
@@ -26,17 +26,14 @@ export interface HardwareState {
   setUsingCustomUrl: (usingCustomUrl: boolean) => void;
 }
 
-// Order matters: mDNS (.local) fails on Windows without Bonjour installed, so the
-// static LAN IP is tried first (works when the ESP is on the local network), then
-// mDNS (macOS/Linux), then the ESP's direct-Ap fallback IP.
-const CANDIDATE_ENDPOINTS = [
-  process.env.NEXT_PUBLIC_ESP32_WS || "ws://esp32-adas.local:81/ws"
-];
+// Canonical mDNS WebSocket endpoint from ESP32 firmware (esp32-adas.local:81/ws)
+export const DEFAULT_MDNS_ENDPOINT = "ws://esp32-adas.local:81/ws";
 
 export const useHardwareStore = create<HardwareState>()((set) => ({
   connected: false,
+  connecting: true,
   lastSeen: 0,
-  esp32Ip: process.env.NEXT_PUBLIC_ESP32_WS || "ws://esp32-adas.local:81/ws",
+  esp32Ip: process.env.NEXT_PUBLIC_ESP32_WS || DEFAULT_MDNS_ENDPOINT,
   buttons: {
     throttle: false,
     brake: false,
@@ -59,82 +56,141 @@ export class HardwareClient {
   private isConnecting = false;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private watchdogTimer: NodeJS.Timeout | null = null;
-  private shouldConnect = false;
-  private candidateIndex = 0;
+  private handshakeTimer: NodeJS.Timeout | null = null;
+  private supervisorTimer: NodeJS.Timeout | null = null;
+  private shouldConnect = true;
   private isCustomUrl = false;
-  // Exponential backoff for reconnect attempts (1s -> 2s -> 4s -> ... -> 15s cap)
-  private backoffMs = 1000;
-  // Generation tag: each connect() bumps this; stale WebSocket events (onclose/onerror
-  // from an old socket) are ignored if their generation doesn't match the current one.
   private generation = 0;
+  private listenersAttached = false;
 
-  // MPU zero-tare offsets — captured by calling calibrate() while the board is flat
+  // Zero-tare offsets for MPU6050
   private zeroPitch = 0;
   private zeroRoll = 0;
   private zeroYaw = 0;
   private lastRawYaw = 0;
 
-  /** Call this while the MPU is resting flat to zero out mounting bias and yaw reference. */
+  /** Tare MPU6050 to zero out mounting offsets */
   public calibrate() {
     const s = useSensor.getState();
     this.zeroPitch = s.pitch;
     this.zeroRoll = s.roll;
     this.zeroYaw = this.lastRawYaw;
-    console.log(`[Hardware] MPU tare — zeroPitch=${this.zeroPitch.toFixed(2)}°, zeroRoll=${this.zeroRoll.toFixed(2)}°, zeroYaw=${this.zeroYaw.toFixed(2)}°`);
+    console.log(
+      `[Hardware] MPU Tare: Pitch=${this.zeroPitch.toFixed(1)}°, Roll=${this.zeroRoll.toFixed(1)}°`
+    );
   }
 
   public init() {
     if (typeof window === "undefined") return;
+
+    if (!this.listenersAttached) {
+      this.listenersAttached = true;
+      // Re-connect aggressively when browser comes online or tab becomes visible
+      window.addEventListener("online", () => this.triggerImmediateReconnect());
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") {
+          this.triggerImmediateReconnect();
+        }
+      });
+
+      // Background supervisor loop: ensures the client is always actively listening
+      this.supervisorTimer = setInterval(() => {
+        if (
+          this.shouldConnect &&
+          !this.ws &&
+          !this.isConnecting &&
+          !useHardwareStore.getState().connected
+        ) {
+          this.connect();
+        }
+      }, 2000);
+    }
+
     this.connect();
   }
 
   public setCustomUrl(url: string) {
     this.isCustomUrl = true;
-    this.candidateIndex = 0;
     useHardwareStore.getState().setUsingCustomUrl(true);
     useHardwareStore.getState().setEsp32Ip(url);
-    this.disconnect();
+    this.disconnect(true);
     this.connect();
   }
 
-  /** Revert back to automatic candidate rotation (called by the HUD "Auto" button). */
   public clearCustomUrl() {
-    if (!this.isCustomUrl) return;
     this.isCustomUrl = false;
-    this.candidateIndex = 0;
-    this.backoffMs = 1000;
     useHardwareStore.getState().setUsingCustomUrl(false);
-    this.disconnect();
+    useHardwareStore.getState().setEsp32Ip(DEFAULT_MDNS_ENDPOINT);
+    this.disconnect(true);
     this.connect();
+  }
+
+  private triggerImmediateReconnect() {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
+      this.cleanupConnection();
+      this.connect();
+    }
   }
 
   public connect() {
     this.shouldConnect = true;
-    if (this.ws || this.isConnecting) return;
+
+    // Already connected and operational
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      return;
+    }
+
+    // Already in the middle of a fresh handshake
+    if (this.isConnecting && this.ws && this.ws.readyState === WebSocket.CONNECTING) {
+      return;
+    }
+
+    this.cleanupConnection();
     this.isConnecting = true;
+    this.generation++;
+    const gen = this.generation;
 
-    const url = this.isCustomUrl
+    const endpoint = this.isCustomUrl
       ? useHardwareStore.getState().esp32Ip
-      : CANDIDATE_ENDPOINTS[this.candidateIndex % CANDIDATE_ENDPOINTS.length];
+      : DEFAULT_MDNS_ENDPOINT;
 
-    useHardwareStore.getState().setEsp32Ip(url);
+    useHardwareStore.setState({ esp32Ip: endpoint, connecting: true });
 
     try {
-      const gen = this.generation;
-      this.ws = new WebSocket(url);
+      const socket = new WebSocket(endpoint);
+      this.ws = socket;
 
-      this.ws.onopen = () => {
-        if (gen !== this.generation) return; // stale socket
+      // 2.5-second handshake watchdog: if browser hangs during mDNS resolution, abort and retry
+      this.handshakeTimer = setTimeout(() => {
+        if (gen !== this.generation) return;
+        if (socket.readyState !== WebSocket.OPEN) {
+          try {
+            socket.close();
+          } catch {
+            // ignore
+          }
+          this.cleanupConnection();
+          this.scheduleReconnect(800);
+        }
+      }, 2500);
+
+      socket.onopen = () => {
+        if (gen !== this.generation) return;
+        this.clearHandshakeTimer();
         this.isConnecting = false;
-        this.backoffMs = 1000; // reset backoff on successful connect
-        useHardwareStore.getState().setConnected(true);
-        console.log(`[Hardware] Connected to ESP32 (${url})`);
+        useHardwareStore.setState({ connected: true, connecting: false });
+        console.log(`[Hardware] Connected to ESP32 mDNS (${endpoint})`);
         this.resetWatchdog();
       };
 
-      this.ws.onmessage = (event) => {
-        if (gen !== this.generation) return; // stale socket
+      socket.onmessage = (event) => {
+        if (gen !== this.generation) return;
         this.resetWatchdog();
+
         try {
           const data = JSON.parse(event.data);
 
@@ -148,28 +204,15 @@ export class HardwareClient {
 
             this.lastRawYaw = rawYaw;
 
-            // Apply zero-tare offsets (removes mounting bias) for sensor store
-            const pitch = rawPitch - this.zeroPitch;
-            const roll = rawRoll - this.zeroRoll;
-
             useSensor.getState().setHardwareData({
-              pitch,
-              roll,
+              pitch: rawPitch - this.zeroPitch,
+              roll: rawRoll - this.zeroRoll,
               yaw: rawYaw,
               ax,
               ay,
               az,
               anomaly: Boolean(data.mpu.anomaly),
             });
-
-            // Roll maps directly: negative roll (tilt left) → look left, positive → look right.
-            // CameraRig applies -lookYaw, so we pass roll as-is (not negated).
-            const lookYaw = Math.max(-45, Math.min(45, (roll / 30) * 45));
-
-            // Pitch: accel-only atan2 (never accumulates gyro error)
-            const accelPitch = Math.atan2(-ax, Math.sqrt(ay * ay + az * az)) * (180 / Math.PI) - this.zeroPitch;
-            const lookPitch = Math.max(-20, Math.min(20, (accelPitch / 15) * 20));
-            useSim.getState().setCameraLook(lookYaw, lookPitch);
           }
 
           if (data.btn) {
@@ -184,42 +227,36 @@ export class HardwareClient {
 
           useHardwareStore.setState({ lastSeen: Date.now(), connected: true });
         } catch {
-          // ignore parsing error
+          // ignore telemetry frame parse error
         }
       };
 
-      this.ws.onclose = () => {
-        // Ignore close events from a socket we've already replaced (stale generation).
+      socket.onclose = () => {
         if (gen !== this.generation) return;
+        this.clearHandshakeTimer();
         this.cleanupConnection();
-        if (!this.isCustomUrl) {
-          this.candidateIndex = (this.candidateIndex + 1) % CANDIDATE_ENDPOINTS.length;
-          // Bump backoff after a failed/closed attempt (unless the socket was the
-          // one we just disconnected deliberately in disconnect()).
-        }
-        this.scheduleReconnect();
+        this.scheduleReconnect(1000);
       };
 
-      this.ws.onerror = () => {
-        if (gen !== this.generation) return; // stale socket
-        if (this.ws) {
-          this.ws.close();
+      socket.onerror = () => {
+        if (gen !== this.generation) return;
+        try {
+          socket.close();
+        } catch {
+          // ignore
         }
       };
     } catch {
       this.cleanupConnection();
-      if (!this.isCustomUrl) {
-        this.candidateIndex = (this.candidateIndex + 1) % CANDIDATE_ENDPOINTS.length;
-      }
-      this.scheduleReconnect();
+      this.scheduleReconnect(1000);
     }
   }
 
-  public disconnect() {
-    this.shouldConnect = false;
-    // Bump the generation so the onclose from this deliberate close is ignored
-    // (and won't schedule a reconnect or null out a freshly-created socket).
+  public disconnect(keepSupervising = false) {
+    this.shouldConnect = keepSupervising;
     this.generation++;
+    this.clearHandshakeTimer();
+
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -229,7 +266,11 @@ export class HardwareClient {
       this.watchdogTimer = null;
     }
     if (this.ws) {
-      this.ws.close();
+      try {
+        this.ws.close();
+      } catch {
+        // ignore
+      }
       this.ws = null;
     }
     this.cleanupConnection();
@@ -240,44 +281,46 @@ export class HardwareClient {
       clearTimeout(this.watchdogTimer);
     }
     const gen = this.generation;
-    // 3 second watchdog for timeout/silence
+
+    // 2.5 second watchdog for continuous 50Hz telemetry packets
     this.watchdogTimer = setTimeout(() => {
-      if (gen !== this.generation || !this.ws) return; // stale/no socket
-      console.warn("[Hardware] Heartbeat timeout (3s) — closing socket & reverting to virtual pad");
-      // Close BEFORE cleanupConnection() so this.ws is still set; cleanupConnection()
-      // then nulls it. (Old code closed after cleanup, leaking the socket.)
+      if (gen !== this.generation || !this.ws) return;
+      console.warn("[Hardware] Telemetry timeout (2.5s) — reconnecting mDNS...");
       const socket = this.ws;
       this.cleanupConnection();
       try {
         socket.close();
       } catch {
-        // already closed
+        // ignore
       }
-    }, 3000);
+      this.scheduleReconnect(500);
+    }, 2500);
+  }
+
+  private clearHandshakeTimer() {
+    if (this.handshakeTimer) {
+      clearTimeout(this.handshakeTimer);
+      this.handshakeTimer = null;
+    }
   }
 
   private cleanupConnection() {
     this.ws = null;
     this.isConnecting = false;
+    this.clearHandshakeTimer();
     if (this.watchdogTimer) {
       clearTimeout(this.watchdogTimer);
       this.watchdogTimer = null;
     }
-    useHardwareStore.getState().setConnected(false);
-    // Fallback on disconnect/timeout
-    useSensor.getState().setSource("virtual-pad");
-    useSim.getState().setCameraLook(0, 0);
+    useHardwareStore.setState({ connected: false, connecting: this.shouldConnect });
   }
 
-  private scheduleReconnect() {
+  private scheduleReconnect(delayMs = 1000) {
     if (!this.shouldConnect || this.reconnectTimer) return;
-    // Exponential backoff: 1s -> 2s -> 4s -> ... -> capped at 15s. Reset on successful connect.
-    const delay = Math.min(this.backoffMs, 15000);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      this.backoffMs = Math.min(this.backoffMs * 2, 15000);
       this.connect();
-    }, delay);
+    }, delayMs);
   }
 }
 
