@@ -62,6 +62,10 @@ class TinyMLCollisionModel:
         self.W_steer = np.random.randn(self.HIDDEN_3, 1).astype(np.float32) * np.sqrt(2.0 / self.HIDDEN_3)
         self.b_steer = np.zeros(1, dtype=np.float32)
 
+        # Stateful AEB Latch & Hold to eliminate CAUTION <-> AEB chattering
+        self.aeb_latched = False
+        self.latch_dist = 0.0
+
     @staticmethod
     def _relu(x: np.ndarray) -> np.ndarray:
         return np.maximum(0.0, x)
@@ -135,7 +139,7 @@ class TinyMLCollisionModel:
         brake_val = float(pred_brake[0][0])
         steer_val = float(pred_steer[0][0])
 
-        speed_ms = float(feature_dict.get("speed_kmh", 0.0)) / 3.6
+        speed_ms = max(0.0, float(feature_dict.get("speed_kmh", 0.0))) / 3.6
         ray_fl = float(feature_dict.get("ray_far_left", 50.0))
         ray_l = float(feature_dict.get("ray_left", 50.0))
         ray_c = float(feature_dict.get("ray_center", 50.0))
@@ -155,23 +159,46 @@ class TinyMLCollisionModel:
 
         # Physics-based safe stopping distance required
         d_req_stop = (speed_ms * 0.25) + ((speed_ms ** 2) / (2.0 * 3.2)) + 3.0
-        is_in_stopping_zone = (fwd_threat_dist <= d_req_stop and speed_ms > 0.6)
-        is_imminent = fwd_threat_dist < 4.5
+        is_in_stopping_zone = (fwd_threat_dist <= d_req_stop and speed_ms > 0.5)
+        is_imminent = fwd_threat_dist < 4.8
 
-        if is_imminent or is_in_stopping_zone:
+        # Critical trigger condition: stopping zone breached, imminent proximity, or NN critical
+        is_critical_trigger = risk_idx == 2 or is_in_stopping_zone or is_imminent
+
+        is_reversing = bool(feature_dict.get("is_reversing", False)) or float(feature_dict.get("speed_kmh", 0.0)) < -0.1
+
+        # Latch AEB on critical condition
+        if is_critical_trigger and not self.aeb_latched and not is_reversing:
+            self.aeb_latched = True
+            self.latch_dist = fwd_threat_dist
+
+        # Clear latch ONLY when driver reverses away or obstacle clearance opens significantly (steered clear)
+        if is_reversing or fwd_threat_dist > 30.0 or (self.aeb_latched and fwd_threat_dist > self.latch_dist + 3.0):
+            self.aeb_latched = False
+            self.latch_dist = 0.0
+
+        effective_e_brake = self.aeb_latched and not is_reversing
+
+        if effective_e_brake:
             risk_idx = 2
             risk_label = "CRITICAL"
-            risk_confidence = max(risk_confidence, 0.98)
-
-        # Emergency brake threshold trigger
-        should_emergency_brake = risk_idx == 2 or brake_val > 0.55 or is_in_stopping_zone or is_imminent
+            risk_confidence = max(risk_confidence, 0.99)
+        elif is_critical_trigger:
+            risk_idx = 2
+            risk_label = "CRITICAL"
+        elif fwd_threat_dist <= (d_req_stop * 1.8 + 6.0) and fwd_threat_dist < 45.0:
+            risk_idx = 1
+            risk_label = "CAUTION"
+        else:
+            risk_idx = 0
+            risk_label = "SAFE"
 
         return {
             "collision_risk": risk_label,
             "risk_index": risk_idx,
             "confidence": round(risk_confidence, 4),
-            "emergency_brake": bool(should_emergency_brake),
-            "brake_intensity": round(max(brake_val if should_emergency_brake else 0.0, 1.0 if should_emergency_brake else 0.0), 3),
+            "emergency_brake": bool(effective_e_brake),
+            "brake_intensity": round(1.0 if effective_e_brake else (0.35 if risk_idx == 1 else 0.0), 3),
             "steering_guidance": round(steer_val, 3),
             "ttc_seconds": ttc,
             "closest_obstacle_m": round(fwd_threat_dist, 2),

@@ -21,7 +21,6 @@ export function HUD() {
   const yawHeading = useSensor((s) => s.yawHeading);
   const roadAnomaly = useSensor((s) => s.roadAnomaly);
 
-  // ADAS Store
   const connected = useAdasStore((s) => s.connected);
   const hwConnected = useHardwareStore((s) => s.connected);
   const esp32Ip = useHardwareStore((s) => s.esp32Ip);
@@ -35,8 +34,8 @@ export function HUD() {
   const latencyMs = useAdasStore((s) => s.latencyMs);
   const rays = useAdasStore((s) => s.rays);
 
-  const isCritical = risk === "CRITICAL" || emergencyBrake;
-  const isCaution = risk === "CAUTION" && !isCritical;
+  const isCritical = connected && (risk === "CRITICAL" || emergencyBrake);
+  const isCaution = connected && risk === "CAUTION" && !isCritical;
 
   let steerText = "▲ LANE CENTERED";
   let steerColor = "text-emerald-400";
@@ -90,7 +89,7 @@ export function HUD() {
                 connected ? "bg-emerald-400 shadow-[0_0_6px_#34d399]" : "bg-zinc-500"
               }`}
             />
-            {connected ? "AI LIVE" : "LOCAL ADAS"}
+            {connected ? "AI LIVE" : "AI OFFLINE"}
           </div>
         </div>
 
@@ -287,7 +286,9 @@ export function HUD() {
         {/* Dynamic Collision Warning Alert Banner */}
         <div
           className={`flex items-center justify-between rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-wider transition-all ${
-            isCritical
+            !connected
+              ? "bg-zinc-800/50 text-zinc-400 border border-white/5"
+              : isCritical
               ? "bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-[0_0_15px_rgba(239,68,68,0.6)]"
               : isCaution
               ? "bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-[0_0_10px_rgba(245,158,11,0.2)]"
@@ -296,16 +297,18 @@ export function HUD() {
         >
           <span className="flex items-center gap-1.5">
             <span className="text-xs">
-              {isCritical ? "🛑" : isCaution ? "⚠" : "✔"}
+              {!connected ? "⚪" : isCritical ? "🛑" : isCaution ? "⚠" : "✔"}
             </span>
-            {isCritical
+            {!connected
+              ? "PYTHON SERVER OFFLINE"
+              : isCritical
               ? "EMERGENCY BRAKE ENGAGED"
               : isCaution
               ? "OBSTACLE PROXIMITY ALERT"
               : "HAUL ROAD CLEAR"}
           </span>
           <span className="text-[9px] font-bold opacity-85">
-            {isCritical ? "AEB ACTIVE" : isCaution ? "CAUTION" : "SAFE"}
+            {!connected ? "STANDBY" : isCritical ? "AEB ACTIVE" : isCaution ? "CAUTION" : "SAFE"}
           </span>
         </div>
 
@@ -317,14 +320,16 @@ export function HUD() {
             </div>
             <div
               className={`mt-0.5 text-base font-black tracking-tight ${
-                closestObstacleM < 15
+                !connected
+                  ? "text-zinc-500"
+                  : closestObstacleM < 15
                   ? "text-red-400 drop-shadow-[0_0_8px_#ef4444]"
                   : closestObstacleM < 30
                   ? "text-amber-400"
                   : "text-white"
               }`}
             >
-              {closestObstacleM >= 80 ? ">80 m" : `${closestObstacleM.toFixed(1)} m`}
+              {!connected ? "--" : closestObstacleM >= 80 ? ">80 m" : `${closestObstacleM.toFixed(1)} m`}
             </div>
           </div>
 
@@ -334,14 +339,16 @@ export function HUD() {
             </div>
             <div
               className={`mt-0.5 text-base font-black tracking-tight ${
-                ttcSeconds < 2.0
+                !connected
+                  ? "text-zinc-500"
+                  : ttcSeconds < 2.0
                   ? "text-red-400 drop-shadow-[0_0_8px_#ef4444]"
                   : ttcSeconds < 4.0
                   ? "text-amber-400"
                   : "text-white"
               }`}
             >
-              {ttcSeconds > 50 ? "SAFE (∞)" : `${ttcSeconds.toFixed(1)} s`}
+              {!connected ? "--" : ttcSeconds > 50 ? "SAFE (∞)" : `${ttcSeconds.toFixed(1)} s`}
             </div>
           </div>
         </div>

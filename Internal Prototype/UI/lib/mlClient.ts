@@ -118,8 +118,9 @@ class ADASWebSocketClient {
         try {
           const res = JSON.parse(event.data);
           useAdasStore.getState().setAdasResult({
+            connected: true,
             collisionRisk: res.collision_risk || "SAFE",
-            emergencyBrake: !!res.emergency_brake,
+            emergencyBrake: Boolean(res.emergency_brake),
             brakeIntensity: res.brake_intensity || 0,
             steeringGuidance: res.steering_guidance || 0,
             ttcSeconds: res.ttc_seconds || 99,
@@ -134,7 +135,16 @@ class ADASWebSocketClient {
       this.ws.onclose = () => {
         this.ws = null;
         this.isConnecting = false;
-        useAdasStore.getState().setAdasResult({ connected: false });
+        useAdasStore.getState().setAdasResult({
+          connected: false,
+          collisionRisk: "SAFE",
+          emergencyBrake: false,
+          brakeIntensity: 0,
+          steeringGuidance: 0,
+          ttcSeconds: 99,
+          closestObstacleM: 80,
+          latencyMs: 0,
+        });
         this.scheduleReconnect();
       };
 
@@ -155,7 +165,14 @@ class ADASWebSocketClient {
     }, 2500);
   }
 
-  public update(x: number, z: number, yaw: number, speed: number, steer: number) {
+  public update(
+    x: number,
+    z: number,
+    yaw: number,
+    speed: number,
+    steer: number,
+    isReversing: boolean = false
+  ) {
     const now = performance.now();
     // Throttle to 30 Hz for optimal network efficiency
     if (now - this.lastSendTime < 33) return;
@@ -196,8 +213,12 @@ class ADASWebSocketClient {
 
     useAdasStore.getState().setAdasResult({ rays });
 
+    const isRev = isReversing || speed < -0.05;
+
+    // ONLY the Python server takes ADAS decisions.
+    // If the Python server is running, telemetry is sent.
+    // If Python server is not running, the website takes ZERO decisions.
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      // Send telemetry to Python TinyML server
       const payload = {
         ray_far_left: rFarLeft,
         ray_left: rLeft,
@@ -208,37 +229,9 @@ class ADASWebSocketClient {
         speed_kmh: Math.round(speedKmh * 10) / 10,
         steer_angle: Math.round(steer * 100) / 100,
         lateral_offset: lateralOffset,
+        is_reversing: isRev,
       };
       this.ws.send(JSON.stringify(payload));
-    } else {
-      // Local fallback calculation
-      const fwdThreatDist = Math.min(rCenter, Math.min(rLeft, rRight) * 1.5);
-      const speedMs = speedKmh / 3.6;
-      const dSafe = speedMs * 0.25 + (speedMs * speedMs) / (2 * 3.2) + 3.0;
-      const ttc = speedMs > 0.5 ? Math.round((fwdThreatDist / speedMs) * 10) / 10 : 99;
-      const isImminent = fwdThreatDist < 4.5;
-      const isInStoppingZone = fwdThreatDist <= dSafe && speedMs > 0.6;
-
-      let risk: CollisionRisk = "SAFE";
-      let eBrake = false;
-      if (isInStoppingZone || isImminent) {
-        risk = "CRITICAL";
-        eBrake = true;
-      } else if (fwdThreatDist <= (dSafe * 1.6 + 8.0) && fwdThreatDist < 45.0) {
-        risk = "CAUTION";
-      }
-
-      const steerDiff = (rRight - rLeft) / Math.max(rRight + rLeft, 1);
-      const steerGuide = Math.max(-1, Math.min(1, steerDiff * 1.8));
-
-      useAdasStore.getState().setAdasResult({
-        collisionRisk: risk,
-        emergencyBrake: eBrake,
-        brakeIntensity: eBrake ? 1.0 : (risk === "CAUTION" ? 0.35 : 0),
-        steeringGuidance: Math.round(steerGuide * 100) / 100,
-        ttcSeconds: ttc,
-        closestObstacleM: fwdThreatDist,
-      });
     }
   }
 }

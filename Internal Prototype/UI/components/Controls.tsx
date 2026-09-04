@@ -17,7 +17,6 @@ export function Controls() {
   const steerVis = useRef(0);
   const spinAngle = useRef(0);
   const joltVis = useRef(0);
-  const aebLatched = useRef(false);
   const estopLatched = useRef(false); // physical E-Stop — clears on button release, disconnect, or X key
   const prevEstop = useRef(false);
   const prevXKey = useRef(false);
@@ -33,10 +32,6 @@ export function Controls() {
 
     const sim = useSim.getState();
     let { x, z, yaw, speed, steer, boost } = sim;
-
-    // ADAS TinyML Perception & Telemetry update
-    adasClient.update(x, z, yaw, speed, steer);
-    const adas = useAdasStore.getState();
 
     const hw = useHardwareStore.getState();
     const connected = hw.connected;
@@ -75,16 +70,16 @@ export function Controls() {
       ? clamp((hwLeft ? 1 : 0) - (hwRight ? 1 : 0), -1, 1)
       : clamp((a ? 1 : 0) - (d ? 1 : 0), -1, 1);
 
-    // E-Stop: rising edge of hw.buttons.estop -> latch INDEPENDENTLY of obstacles
+    // Active Reversing condition (driver commanding reverse or actively moving backward)
+    const isReversing = keyThrottle < 0 || (speed < -0.05 && keyThrottle <= 0);
+
+    // E-Stop: physical hardware button / X key latch
     if (connected && hw.buttons.estop && !prevEstop.current) {
       estopLatched.current = true;
-      aebLatched.current = true;
     }
-    // Release E-Stop when button is released, HW disconnects, or user presses X
     const xKey = isKeyDown("KeyX");
     if (xKey && !prevXKey.current) {
       estopLatched.current = false;
-      aebLatched.current = false;
     }
     prevXKey.current = xKey;
     if (!connected || (prevEstop.current && !hw.buttons.estop)) {
@@ -93,26 +88,15 @@ export function Controls() {
     prevEstop.current = connected ? hw.buttons.estop : false;
     useHardwareStore.getState().setEstopActive(estopLatched.current);
 
-    // Active Reversing condition (driver pressing 'S'/brake or moving backward)
-    const isReversing = keyThrottle < 0 || (speed < -0.05 && keyThrottle <= 0);
+    // ADAS TinyML Perception & Telemetry update (telemetry streamed to Python inference server)
+    adasClient.update(x, z, yaw, speed, steer, isReversing);
+    const adas = useAdasStore.getState();
 
-    // AEB from obstacle detection (only when not reversing)
-    if (adas.emergencyBrake || adas.closestObstacleM < 4.8) {
-      if (!isReversing) {
-        aebLatched.current = true;
-      }
-    }
-
-    // Release obstacle AEB only (NOT E-Stop) when clearance opens and not emergency brake
-    if (!estopLatched.current && adas.closestObstacleM > 6.0 && !adas.emergencyBrake) {
-      aebLatched.current = false;
-    }
-    // Allow reverse to escape (but only if E-Stop is not latched)
-    if (!estopLatched.current && isReversing && speed < -0.05) {
-      aebLatched.current = false;
-    }
-
-    const isBlockedAhead = (aebLatched.current || adas.emergencyBrake) && !isReversing;
+    // Autonomous Emergency Brake & E-Stop Interlock
+    // AEB acts strictly when Python TinyML server is connected and commands emergencyBrake: true
+    const isEStopped = estopLatched.current;
+    const isAebActive = adas.connected && adas.emergencyBrake && !isReversing;
+    const isBlockedAhead = isEStopped || isAebActive;
 
     let throttle = keyThrottle;
     if (isBlockedAhead && throttle > 0) {
