@@ -35,12 +35,12 @@ export function CameraRig() {
     const rightZ = -Math.sin(sim.yaw);
 
     if (sim.camMode === "top") {
-      tx = sim.x + fwdX * 4;
+      tx = sim.x - fwdX * CAMERA.topOffsetZ;
       ty = CAMERA.topHeight;
-      tz = sim.z + fwdZ * CAMERA.topOffsetZ;
-      lx = sim.x;
+      tz = sim.z - fwdZ * CAMERA.topOffsetZ;
+      lx = sim.x + fwdX * 4;
       ly = 0;
-      lz = sim.z;
+      lz = sim.z + fwdZ * 4;
       targetFov = 50;
     } else if (sim.camMode === "cockpit") {
       // Driver seat inside the cab (left-side driver position, looking out through windshield)
@@ -137,6 +137,7 @@ export function CameraRig() {
     }
 
     camera.position.copy(camPos.current);
+    camera.up.set(0, 1, 0);
     camera.lookAt(lookTarget.current.x, lookTarget.current.y, lookTarget.current.z);
   });
 
