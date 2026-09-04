@@ -17,15 +17,20 @@ export interface HardwareState {
   lastSeen: number;
   esp32Ip: string;
   buttons: HardwareButtons;
+  estopActive: boolean;
+  usingCustomUrl: boolean;
   setConnected: (connected: boolean) => void;
   setButtons: (buttons: Partial<HardwareButtons>) => void;
   setEsp32Ip: (ip: string) => void;
+  setEstopActive: (active: boolean) => void;
+  setUsingCustomUrl: (usingCustomUrl: boolean) => void;
 }
 
+// Order matters: mDNS (.local) fails on Windows without Bonjour installed, so the
+// static LAN IP is tried first (works when the ESP is on the local network), then
+// mDNS (macOS/Linux), then the ESP's direct-Ap fallback IP.
 const CANDIDATE_ENDPOINTS = [
-  process.env.NEXT_PUBLIC_ESP32_WS || "ws://esp32-adas.local:81/ws",
-  "ws://192.168.0.103:81/ws",
-  "ws://192.168.4.1:81/ws",
+  process.env.NEXT_PUBLIC_ESP32_WS || "ws://esp32-adas.local:81/ws"
 ];
 
 export const useHardwareStore = create<HardwareState>()((set) => ({
@@ -39,10 +44,14 @@ export const useHardwareStore = create<HardwareState>()((set) => ({
     right: false,
     estop: false,
   },
+  estopActive: false,
+  usingCustomUrl: false,
   setConnected: (connected) => set({ connected }),
   setButtons: (buttons) =>
     set((state) => ({ buttons: { ...state.buttons, ...buttons } })),
   setEsp32Ip: (esp32Ip) => set({ esp32Ip }),
+  setEstopActive: (estopActive) => set({ estopActive }),
+  setUsingCustomUrl: (usingCustomUrl) => set({ usingCustomUrl }),
 }));
 
 export class HardwareClient {
@@ -53,17 +62,25 @@ export class HardwareClient {
   private shouldConnect = false;
   private candidateIndex = 0;
   private isCustomUrl = false;
+  // Exponential backoff for reconnect attempts (1s -> 2s -> 4s -> ... -> 15s cap)
+  private backoffMs = 1000;
+  // Generation tag: each connect() bumps this; stale WebSocket events (onclose/onerror
+  // from an old socket) are ignored if their generation doesn't match the current one.
+  private generation = 0;
 
   // MPU zero-tare offsets — captured by calling calibrate() while the board is flat
   private zeroPitch = 0;
   private zeroRoll = 0;
+  private zeroYaw = 0;
+  private lastRawYaw = 0;
 
-  /** Call this while the MPU is resting flat to zero out mounting bias. */
+  /** Call this while the MPU is resting flat to zero out mounting bias and yaw reference. */
   public calibrate() {
     const s = useSensor.getState();
     this.zeroPitch = s.pitch;
     this.zeroRoll = s.roll;
-    console.log(`[Hardware] MPU tare — zeroPitch=${this.zeroPitch.toFixed(2)}°, zeroRoll=${this.zeroRoll.toFixed(2)}°`);
+    this.zeroYaw = this.lastRawYaw;
+    console.log(`[Hardware] MPU tare — zeroPitch=${this.zeroPitch.toFixed(2)}°, zeroRoll=${this.zeroRoll.toFixed(2)}°, zeroYaw=${this.zeroYaw.toFixed(2)}°`);
   }
 
   public init() {
@@ -73,7 +90,20 @@ export class HardwareClient {
 
   public setCustomUrl(url: string) {
     this.isCustomUrl = true;
+    this.candidateIndex = 0;
+    useHardwareStore.getState().setUsingCustomUrl(true);
     useHardwareStore.getState().setEsp32Ip(url);
+    this.disconnect();
+    this.connect();
+  }
+
+  /** Revert back to automatic candidate rotation (called by the HUD "Auto" button). */
+  public clearCustomUrl() {
+    if (!this.isCustomUrl) return;
+    this.isCustomUrl = false;
+    this.candidateIndex = 0;
+    this.backoffMs = 1000;
+    useHardwareStore.getState().setUsingCustomUrl(false);
     this.disconnect();
     this.connect();
   }
@@ -90,49 +120,54 @@ export class HardwareClient {
     useHardwareStore.getState().setEsp32Ip(url);
 
     try {
+      const gen = this.generation;
       this.ws = new WebSocket(url);
 
       this.ws.onopen = () => {
+        if (gen !== this.generation) return; // stale socket
         this.isConnecting = false;
+        this.backoffMs = 1000; // reset backoff on successful connect
         useHardwareStore.getState().setConnected(true);
         console.log(`[Hardware] Connected to ESP32 (${url})`);
         this.resetWatchdog();
       };
 
       this.ws.onmessage = (event) => {
+        if (gen !== this.generation) return; // stale socket
         this.resetWatchdog();
         try {
           const data = JSON.parse(event.data);
 
           if (data.mpu) {
             const rawPitch = Number(data.mpu.pitch) || 0;
-            const rawRoll  = Number(data.mpu.roll)  || 0;
+            const rawRoll = Number(data.mpu.roll) || 0;
+            const rawYaw = Number(data.mpu.yaw) || 0;
             const ax = Number(data.mpu.ax) || 0;
             const ay = Number(data.mpu.ay) || 0;
             const az = Number(data.mpu.az) || 0;
 
+            this.lastRawYaw = rawYaw;
+
             // Apply zero-tare offsets (removes mounting bias) for sensor store
             const pitch = rawPitch - this.zeroPitch;
-            const roll  = rawRoll  - this.zeroRoll;
+            const roll = rawRoll - this.zeroRoll;
 
             useSensor.getState().setHardwareData({
               pitch,
               roll,
-              yaw: Number(data.mpu.yaw) || 0,
+              yaw: rawYaw,
               ax,
               ay,
               az,
               anomaly: Boolean(data.mpu.anomaly),
             });
 
-            // Camera look: use drift-free accel-only angles (atan2 on raw g-vectors).
-            // These NEVER accumulate gyro error — they always track true physical tilt.
-            // Apply the same zero-tare offsets so CAL MPU recentres the camera too.
-            const accelRoll  = Math.atan2(ay, az) * (180 / Math.PI) - this.zeroRoll;
-            const accelPitch = Math.atan2(-ax, Math.sqrt(ay * ay + az * az)) * (180 / Math.PI) - this.zeroPitch;
+            // Roll maps directly: negative roll (tilt left) → look left, positive → look right.
+            // CameraRig applies -lookYaw, so we pass roll as-is (not negated).
+            const lookYaw = Math.max(-45, Math.min(45, (roll / 30) * 45));
 
-            // ±15° physical tilt -> ±30° camera yaw, ±20° camera pitch
-            const lookYaw   = Math.max(-30, Math.min(30, (accelRoll  / 15) * 30));
+            // Pitch: accel-only atan2 (never accumulates gyro error)
+            const accelPitch = Math.atan2(-ax, Math.sqrt(ay * ay + az * az)) * (180 / Math.PI) - this.zeroPitch;
             const lookPitch = Math.max(-20, Math.min(20, (accelPitch / 15) * 20));
             useSim.getState().setCameraLook(lookYaw, lookPitch);
           }
@@ -154,14 +189,19 @@ export class HardwareClient {
       };
 
       this.ws.onclose = () => {
+        // Ignore close events from a socket we've already replaced (stale generation).
+        if (gen !== this.generation) return;
         this.cleanupConnection();
         if (!this.isCustomUrl) {
           this.candidateIndex = (this.candidateIndex + 1) % CANDIDATE_ENDPOINTS.length;
+          // Bump backoff after a failed/closed attempt (unless the socket was the
+          // one we just disconnected deliberately in disconnect()).
         }
         this.scheduleReconnect();
       };
 
       this.ws.onerror = () => {
+        if (gen !== this.generation) return; // stale socket
         if (this.ws) {
           this.ws.close();
         }
@@ -177,6 +217,9 @@ export class HardwareClient {
 
   public disconnect() {
     this.shouldConnect = false;
+    // Bump the generation so the onclose from this deliberate close is ignored
+    // (and won't schedule a reconnect or null out a freshly-created socket).
+    this.generation++;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -196,12 +239,19 @@ export class HardwareClient {
     if (this.watchdogTimer) {
       clearTimeout(this.watchdogTimer);
     }
+    const gen = this.generation;
     // 3 second watchdog for timeout/silence
     this.watchdogTimer = setTimeout(() => {
-      console.warn("[Hardware] Heartbeat timeout (3s) — reverting to virtual pad");
+      if (gen !== this.generation || !this.ws) return; // stale/no socket
+      console.warn("[Hardware] Heartbeat timeout (3s) — closing socket & reverting to virtual pad");
+      // Close BEFORE cleanupConnection() so this.ws is still set; cleanupConnection()
+      // then nulls it. (Old code closed after cleanup, leaking the socket.)
+      const socket = this.ws;
       this.cleanupConnection();
-      if (this.ws) {
-        this.ws.close();
+      try {
+        socket.close();
+      } catch {
+        // already closed
       }
     }, 3000);
   }
@@ -221,10 +271,13 @@ export class HardwareClient {
 
   private scheduleReconnect() {
     if (!this.shouldConnect || this.reconnectTimer) return;
+    // Exponential backoff: 1s -> 2s -> 4s -> ... -> capped at 15s. Reset on successful connect.
+    const delay = Math.min(this.backoffMs, 15000);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
+      this.backoffMs = Math.min(this.backoffMs * 2, 15000);
       this.connect();
-    }, 3000);
+    }, delay);
   }
 }
 

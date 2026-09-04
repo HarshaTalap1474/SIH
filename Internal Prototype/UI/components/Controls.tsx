@@ -18,8 +18,9 @@ export function Controls() {
   const spinAngle = useRef(0);
   const joltVis = useRef(0);
   const aebLatched = useRef(false);
-  const estopLatched = useRef(false); // physical E-Stop — only clears on HW disconnect
+  const estopLatched = useRef(false); // physical E-Stop — clears on button release, disconnect, or X key
   const prevEstop = useRef(false);
+  const prevXKey = useRef(false);
 
   useEffect(() => {
     adasClient.init();
@@ -79,11 +80,18 @@ export function Controls() {
       estopLatched.current = true;
       aebLatched.current = true;
     }
-    // Release E-Stop only when HW disconnects or user manually reverses out
-    if (!connected) {
+    // Release E-Stop when button is released, HW disconnects, or user presses X
+    const xKey = isKeyDown("KeyX");
+    if (xKey && !prevXKey.current) {
+      estopLatched.current = false;
+      aebLatched.current = false;
+    }
+    prevXKey.current = xKey;
+    if (!connected || (prevEstop.current && !hw.buttons.estop)) {
       estopLatched.current = false;
     }
     prevEstop.current = connected ? hw.buttons.estop : false;
+    useHardwareStore.getState().setEstopActive(estopLatched.current);
 
     // Active Reversing condition (driver pressing 'S'/brake or moving backward)
     const isReversing = keyThrottle < 0 || (speed < -0.05 && keyThrottle <= 0);

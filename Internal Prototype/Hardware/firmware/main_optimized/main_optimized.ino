@@ -82,6 +82,9 @@ float pitch = 0, roll = 0, yaw = 0;
 float axG = 0, ayG = 0, azG = 1.0;
 bool roadAnomaly = false;
 
+// Latest button state (module-level so we can re-send on client connect)
+bool btnThr = false, btnBrake = false, btnLeft = false, btnRight = false, btnEstop = false;
+
 unsigned long lastUpdate = 0;
 int buttonPins[5] = {BTN_THROTTLE, BTN_BRAKE, BTN_LEFT, BTN_RIGHT, BTN_ESTOP};
 bool btnState[5] = {false, false, false, false, false};
@@ -185,13 +188,47 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length)
   switch (type) {
     case WStype_CONNECTED:
       Serial.printf("[WS] Client %u connected\n", num);
+      // Push CURRENT state immediately so the client never starts from stale data.
+      broadcastState();
       break;
     case WStype_DISCONNECTED:
       Serial.printf("[WS] Client %u disconnected\n", num);
+      // Actively tear down so any buffered lagging frames are dropped,
+      // not replayed to the next connection.
+      webSocket.disconnect(num);
       break;
     default:
       break;
   }
+}
+
+// Print WHY the chip booted (crash/reboot vs deliberate power-up). This lets us
+// tell apart a WiFi-only drop from a full crash/reboot (which would explain
+// "connects, works, then drops" if the firmware panics).
+void logBootReason() {
+  esp_reset_reason_t r = esp_reset_reason();
+  const char* name;
+  switch (r) {
+    case ESP_RST_POWERON:        name = "POWER-ON"; break;
+    case ESP_RST_SW:             name = "SOFTWARE (esp_restart)"; break;
+    case ESP_RST_PANIC:          name = "PANIC/CRASH"; break;
+    case ESP_RST_INT_WDT:        name = "INT WATCHDOG TIMEOUT"; break;
+    case ESP_RST_TASK_WDT:       name = "TASK WATCHDOG TIMEOUT"; break;
+    case ESP_RST_WDT:            name = "OTHER WATCHDOG"; break;
+    case ESP_RST_DEEPSLEEP:      name = "DEEP-SLEEP WAKE"; break;
+    case ESP_RST_BROWNOUT:       name = "BROWNOUT (low power)"; break;
+    case ESP_RST_SDIO:           name = "SDIO"; break;
+    case ESP_RST_USB:            name = "USB"; break;
+    case ESP_RST_JTAG:           name = "JTAG"; break;
+    case ESP_RST_EFUSE:          name = "EFUSE"; break;
+    case ESP_RST_PWR_GLITCH:     name = "POWER-GLITCH"; break;
+    case ESP_RST_CPU_LOCKUP:     name = "CPU LOCKUP"; break;
+    default:                     name = "UNKNOWN"; break;
+  }
+  // Important: only a PANIC/watchdog/glitch is a CRASH. Power-on/software/USB are normal.
+  Serial.printf("[BOOT] Reset reason: %d (%s)%s\n", (int)r, name,
+    (r == ESP_RST_PANIC || r == ESP_RST_INT_WDT || r == ESP_RST_TASK_WDT || r == ESP_RST_WDT || r == ESP_RST_CPU_LOCKUP)
+      ? "  <-- POSSIBLE CRASH" : "");
 }
 
 // ---------------- SETUP ----------------
@@ -199,6 +236,7 @@ void setup() {
   Serial.begin(115200);
   delay(200);
   Serial.println("\n[HW] Booting HEMM ADAS Super Mini Node (V2 Optimized)...");
+  logBootReason();
 
   // Buttons: active-low with internal pullups
   for (int i = 0; i < 5; i++) {
@@ -235,7 +273,30 @@ void setup() {
   calibrateGyro();
 
   // ---------------- Standard tzapu WiFiManager ----------------
+  // ESP32-C3 fix: force AP+STA mode BEFORE WiFiManager so the AP beacon is always visible.
+  WiFi.mode(WIFI_AP_STA);
   WiFi.setTxPower(WIFI_POWER_19_5dBm); // Maximum antenna output for C3
+
+  // CRITICAL on ESP32-C3: core 3.3.x defaults to MODEM SLEEP (WIFI_PS_MIN_MODEM),
+  // which causes WiFi dropouts/latency while streaming WebSocket data.
+  WiFi.setSleep(false);
+
+  // Detect WiFi drops at runtime for logging + re-arm mDNS on recovery.
+  // The core already auto-reconnects STA on most failure reasons; this only logs
+  // the event so we can see drops versus crashes in the serial log.
+  WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
+    if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+      Serial.printf("[WIFI] STA DISCONNECTED (reason=%u)\n", info.wifi_sta_disconnected.reason);
+    } else if (event == ARDUINO_EVENT_WIFI_STA_CONNECTED) {
+      Serial.println("[WIFI] STA reconnected — re-registering mDNS");
+      if (MDNS.begin(MDNS_HOST)) {
+        MDNS.addService("ws", "tcp", WS_PORT);
+      }
+    } else if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
+      Serial.printf("[WIFI] Got IP: %s\n", WiFi.localIP().toString().c_str());
+    }
+  });
+
   WiFiManager wm;
 
   // Set timeout to 180 seconds (3 minutes)
@@ -256,10 +317,12 @@ void setup() {
     Serial.printf("[WIFI] Connected to network. IP: %s\n", WiFi.localIP().toString().c_str());
   } else {
     Serial.println("[WIFI] Portal timed out or connection failed -> starting standalone AP");
-    WiFi.mode(WIFI_AP);
+    // IMPORTANT: keep AP+STA mode (NOT switch to WIFI_AP). Switching to WIFI_AP
+    // destroys the STA interface permanently, so the device could never rejoin
+    // the network until reset. Stay in AP_STA so STA can recover later.
     WiFi.softAP(AP_NAME);
     delay(100);
-    Serial.printf("[WIFI] Standalone AP active. IP: %s\n", WiFi.softAPIP().toString().c_str());
+    Serial.printf("[WIFI] Standalone AP active. IP: %s (STA kept alive in AP_STA mode)\n", WiFi.softAPIP().toString().c_str());
   }
 
   // ---------------- mDNS Zero-Config ----------------
@@ -272,6 +335,10 @@ void setup() {
 
   webSocket.begin();
   webSocket.onEvent(webSocketEvent);
+  // Heartbeat: ping every 2s, drop a client that misses 2 pongs (4s) without replying.
+  // Reliably detects dead/half-open connections so stale buffered frames are
+  // never replayed to the next reconnect.
+  webSocket.enableHeartbeat(2000, 3000, 2);
   Serial.printf("[WS] Server ready on ws://%s:%d%s (or ws://%s.local:%d%s)\n",
     (WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : WiFi.softAPIP().toString()).c_str(),
     WS_PORT, WS_PATH, MDNS_HOST, WS_PORT, WS_PATH);
@@ -281,6 +348,27 @@ void setup() {
 }
 
 // ---------------- MAIN LOOP (50Hz Cadence) ----------------
+// Build and broadcast the current sensor+button state to all LIVE clients.
+// connectedClients(true) actively pings clients so stale half-open sockets
+// (which cannot pong) are excluded and never accumulate a replay backlog.
+void broadcastState() {
+  if (webSocket.connectedClients(true) <= 0) {
+    return; // no live listeners — do not build/push frames
+  }
+  char buf[280];
+  snprintf(buf, sizeof(buf),
+    "{\"mpu\":{\"pitch\":%.2f,\"roll\":%.2f,\"yaw\":%.1f,"
+    "\"ax\":%.3f,\"ay\":%.3f,\"az\":%.3f,\"anomaly\":%s},"
+    "\"btn\":{\"throttle\":%s,\"brake\":%s,\"left\":%s,\"right\":%s,\"estop\":%s}}",
+    pitch, roll, yaw, axG, ayG, azG,
+    roadAnomaly ? "true" : "false",
+    btnThr ? "true" : "false", btnBrake ? "true" : "false",
+    btnLeft ? "true" : "false", btnRight ? "true" : "false",
+    btnEstop ? "true" : "false");
+
+  webSocket.broadcastTXT(buf);
+}
+
 void loop() {
   webSocket.loop();
 
@@ -314,25 +402,12 @@ void loop() {
   }
 
   // 2. Read 5 Buttons
-  bool thr   = updateButton(0);
-  bool brake = updateButton(1);
-  bool left  = updateButton(2);
-  bool right = updateButton(3);
-  bool estop = updateButton(4);
+  btnThr   = updateButton(0);
+  btnBrake = updateButton(1);
+  btnLeft  = updateButton(2);
+  btnRight = updateButton(3);
+  btnEstop = updateButton(4);
 
-  // 3. Broadcast WebSocket JSON to connected clients (skip formatting if no client connected)
-  if (webSocket.connectedClients() > 0) {
-    char buf[280];
-    snprintf(buf, sizeof(buf),
-      "{\"mpu\":{\"pitch\":%.2f,\"roll\":%.2f,\"yaw\":%.1f,"
-      "\"ax\":%.3f,\"ay\":%.3f,\"az\":%.3f,\"anomaly\":%s},"
-      "\"btn\":{\"throttle\":%s,\"brake\":%s,\"left\":%s,\"right\":%s,\"estop\":%s}}",
-      pitch, roll, yaw, axG, ayG, azG,
-      roadAnomaly ? "true" : "false",
-      thr ? "true" : "false", brake ? "true" : "false",
-      left ? "true" : "false", right ? "true" : "false",
-      estop ? "true" : "false");
-
-    webSocket.broadcastTXT(buf);
-  }
+  // 3. Broadcast WebSocket JSON to all live clients
+  broadcastState();
 }

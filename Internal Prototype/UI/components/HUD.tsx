@@ -16,9 +16,6 @@ export function HUD() {
   const ax = useSensor((s) => s.ax);
   const ay = useSensor((s) => s.ay);
   const az = useSensor((s) => s.az);
-  const gx = useSensor((s) => s.gx);
-  const gy = useSensor((s) => s.gy);
-  const gz = useSensor((s) => s.gz);
   const pitch = useSensor((s) => s.pitch);
   const roll = useSensor((s) => s.roll);
   const yawHeading = useSensor((s) => s.yawHeading);
@@ -27,6 +24,9 @@ export function HUD() {
   // ADAS Store
   const connected = useAdasStore((s) => s.connected);
   const hwConnected = useHardwareStore((s) => s.connected);
+  const esp32Ip = useHardwareStore((s) => s.esp32Ip);
+  const usingCustomUrl = useHardwareStore((s) => s.usingCustomUrl);
+  const estopActive = useHardwareStore((s) => s.estopActive);
   const risk = useAdasStore((s) => s.collisionRisk);
   const emergencyBrake = useAdasStore((s) => s.emergencyBrake);
   const closestObstacleM = useAdasStore((s) => s.closestObstacleM);
@@ -57,10 +57,11 @@ export function HUD() {
   return (
     <div className="pointer-events-none fixed left-4 top-4 z-20 flex max-h-[calc(100vh-2rem)] w-84 max-w-[calc(100vw-2rem)] flex-col gap-2.5 overflow-y-auto font-sans text-white select-none scrollbar-none">
       {/* ========================================================================= */}
-      {/* 1. HEADER & SYSTEM TELEMETRY BADGE                                       */}
+      {/* 1. HEADER & HARDWARE CONNECTIVITY                                         */}
       {/* ========================================================================= */}
-      <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-b from-zinc-900/90 to-zinc-950/90 p-3.5 shadow-2xl backdrop-blur-2xl">
-        <div className="flex items-center justify-between">
+      <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-b from-zinc-900/90 to-zinc-950/90 shadow-2xl backdrop-blur-2xl">
+        {/* Title Bar */}
+        <div className="flex items-center justify-between p-3.5 pb-0">
           <div className="flex items-center gap-2.5">
             <span className="relative flex h-3 w-3">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
@@ -76,64 +77,101 @@ export function HUD() {
             </div>
           </div>
 
-          {/* Connection Status Pills */}
-          <div className="flex items-center gap-1.5">
-            {/* HW Connection Status Pill */}
-            <button
-              type="button"
-              onClick={() => {
-                const current = useHardwareStore.getState().esp32Ip;
-                const next = window.prompt("ESP32 WebSocket URL:", current);
-                if (next && next.trim()) {
-                  hwClient.setCustomUrl(next.trim());
-                }
-              }}
-              title={`ESP32 Target: ${useHardwareStore.getState().esp32Ip}\nClick to change URL`}
-              className={`pointer-events-auto cursor-pointer flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider uppercase border transition-all ${
+          {/* AI Status Pill */}
+          <div
+            className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider uppercase border transition-all ${
+              connected
+                ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.3)]"
+                : "bg-zinc-800/60 border-white/10 text-zinc-400"
+            }`}
+          >
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                connected ? "bg-emerald-400 shadow-[0_0_6px_#34d399]" : "bg-zinc-500"
+              }`}
+            />
+            {connected ? "AI LIVE" : "LOCAL ADAS"}
+          </div>
+        </div>
+
+        {/* Hardware Connection Panel */}
+        <div className="mx-3.5 mt-2.5 mb-3.5 rounded-xl border border-white/5 bg-white/[0.03] p-2.5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              {/* Connection indicator */}
+              <div className={`relative flex items-center justify-center h-7 w-7 rounded-lg ${
                 hwConnected
-                  ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.3)] hover:bg-emerald-500/25"
-                  : "bg-zinc-800/60 border-white/10 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
-              }`}
-            >
-              <span
-                className={`h-1.5 w-1.5 rounded-full ${
-                  hwConnected ? "bg-emerald-400 shadow-[0_0_6px_#34d399]" : "bg-zinc-500"
-                }`}
-              />
-              {hwConnected ? "HW CONNECTED" : "HW OFFLINE"}
-            </button>
+                  ? "bg-emerald-500/15 border border-emerald-500/30"
+                  : "bg-zinc-800/80 border border-white/10"
+              }`}>
+                <span className={`text-sm ${hwConnected ? "text-emerald-400" : "text-zinc-500"}`}>
+                  {hwConnected ? "⚡" : "⏻"}
+                </span>
+                {hwConnected && (
+                  <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399] animate-pulse" />
+                )}
+              </div>
 
-            {/* MPU Calibrate button — only show when hardware is connected */}
-            {hwConnected && (
-              <button
-                type="button"
-                onClick={() => {
-                  hwClient.calibrate();
-                  window.alert("MPU tared ✓  — board is now zeroed to current orientation.");
-                }}
-                title="Tare MPU6050: zero pitch & roll to current orientation"
-                className="pointer-events-auto cursor-pointer flex items-center gap-1 rounded-full px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider uppercase border border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 transition-all"
-              >
-                ⊕ CAL MPU
-              </button>
-            )}
+              <div>
+                <div className={`text-[10px] font-bold uppercase tracking-wider ${
+                  hwConnected ? "text-emerald-300" : "text-zinc-400"
+                }`}>
+                  {hwConnected ? "ESP32 CONNECTED" : "ESP32 OFFLINE"}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const current = useHardwareStore.getState().esp32Ip;
+                    const next = window.prompt("ESP32 WebSocket URL:", current);
+                    if (next && next.trim()) {
+                      hwClient.setCustomUrl(next.trim());
+                    }
+                  }}
+                  className="pointer-events-auto cursor-pointer text-[8px] font-mono text-zinc-500 hover:text-amber-400 transition-colors truncate max-w-[140px] block text-left"
+                  title={`Click to change URL\nCurrent: ${esp32Ip}`}
+                >
+                  {esp32Ip.replace("ws://", "").replace("/ws", "")}
+                </button>
+              </div>
+            </div>
 
-            {/* AI Connection Status Pill */}
-            <div
-              className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[9px] font-mono font-bold tracking-wider uppercase border transition-all ${
-                connected
-                  ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.3)]"
-                  : "bg-zinc-800/60 border-white/10 text-zinc-400"
-              }`}
-            >
-              <span
-                className={`h-1.5 w-1.5 rounded-full ${
-                  connected ? "bg-emerald-400 shadow-[0_0_6px_#34d399]" : "bg-zinc-500"
-                }`}
-              />
-              {connected ? "AI LIVE" : "LOCAL ADAS"}
+            {/* Action buttons */}
+            <div className="flex items-center gap-1">
+              {usingCustomUrl && (
+                <button
+                  type="button"
+                  onClick={() => hwClient.clearCustomUrl()}
+                  title="Back to automatic endpoint detection"
+                  className="pointer-events-auto cursor-pointer rounded-md px-2 py-1 text-[8px] font-mono font-bold uppercase border border-sky-500/30 bg-sky-500/10 text-sky-300 hover:bg-sky-500/20 transition-all"
+                >
+                  Auto
+                </button>
+              )}
+              {hwConnected && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    hwClient.calibrate();
+                    window.alert("MPU tared ✓  — board is now zeroed to current orientation.");
+                  }}
+                  title="Tare MPU6050: zero pitch & roll to current orientation"
+                  className="pointer-events-auto cursor-pointer rounded-md px-2 py-1 text-[8px] font-mono font-bold uppercase border border-amber-500/30 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 transition-all"
+                >
+                  ⊕ CAL
+                </button>
+              )}
             </div>
           </div>
+
+          {/* Connection quality bar (only when connected) */}
+          {hwConnected && (
+            <div className="mt-2 flex items-center gap-2">
+              <div className="flex-1 h-1 rounded-full bg-zinc-800 overflow-hidden">
+                <div className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.4)] animate-pulse" style={{ width: "100%" }} />
+              </div>
+              <span className="text-[8px] font-mono text-emerald-400/70 uppercase tracking-wider">Live 50Hz</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -360,26 +398,72 @@ export function HUD() {
           <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
             MPU6050 6-DOF Inclinometer
           </span>
-          {roadAnomaly && (
-            <span className="animate-pulse rounded-md bg-orange-500/20 border border-orange-400/50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-orange-300 shadow-[0_0_8px_rgba(249,115,22,0.3)]">
-              ⚠ Road Anomaly
-            </span>
-          )}
+          <div className="flex items-center gap-1.5">
+            {estopActive && (
+              <span className="animate-pulse rounded-md bg-red-500/20 border border-red-400/50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-red-300 shadow-[0_0_8px_rgba(239,68,68,0.3)]">
+                E-STOP ACTIVE [X to clear]
+              </span>
+            )}
+            {roadAnomaly && (
+              <span className="animate-pulse rounded-md bg-orange-500/20 border border-orange-400/50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-orange-300 shadow-[0_0_8px_rgba(249,115,22,0.3)]">
+                Road Anomaly
+              </span>
+            )}
+          </div>
         </div>
 
-        {/* Dual Attitude Inclinometer Level Displays */}
-        <div className="grid grid-cols-3 gap-1.5 mb-2.5 text-center">
-          <div className="rounded-xl border border-white/5 bg-white/5 p-1.5">
+        {/* Attitude Visual + Data */}
+        <div className="grid grid-cols-3 gap-1.5 mb-2.5">
+          {/* Pitch */}
+          <div className="rounded-xl border border-white/5 bg-white/5 p-2 text-center">
             <span className="text-[8px] uppercase tracking-wider text-zinc-400">Pitch</span>
-            <div className="text-xs font-black text-amber-400">{f0(pitch)}°</div>
+            <div className={`text-base font-black tabular-nums ${
+              Math.abs(pitch) > 15 ? "text-red-400" : Math.abs(pitch) > 8 ? "text-amber-400" : "text-amber-400"
+            }`}>
+              {f0(pitch)}°
+            </div>
+            {/* Mini horizon bar for pitch */}
+            <div className="mt-1 h-1 w-full rounded-full bg-zinc-800 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-amber-400/60 transition-all duration-150"
+                style={{
+                  width: `${Math.min(100, Math.abs(pitch) / 30 * 100)}%`,
+                  marginLeft: pitch > 0 ? "50%" : `${Math.max(0, 50 - Math.abs(pitch) / 30 * 50)}%`,
+                }}
+              />
+            </div>
           </div>
-          <div className="rounded-xl border border-white/5 bg-white/5 p-1.5">
+
+          {/* Roll */}
+          <div className="rounded-xl border border-white/5 bg-white/5 p-2 text-center">
             <span className="text-[8px] uppercase tracking-wider text-zinc-400">Roll</span>
-            <div className="text-xs font-black text-amber-400">{f0(roll)}°</div>
+            <div className={`text-base font-black tabular-nums ${
+              Math.abs(roll) > 15 ? "text-red-400" : Math.abs(roll) > 8 ? "text-amber-400" : "text-amber-400"
+            }`}>
+              {f0(roll)}°
+            </div>
+            {/* Mini horizon bar for roll */}
+            <div className="mt-1 h-1 w-full rounded-full bg-zinc-800 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-amber-400/60 transition-all duration-150"
+                style={{
+                  width: `${Math.min(100, Math.abs(roll) / 30 * 100)}%`,
+                  marginLeft: roll > 0 ? "50%" : `${Math.max(0, 50 - Math.abs(roll) / 30 * 50)}%`,
+                }}
+              />
+            </div>
           </div>
-          <div className="rounded-xl border border-white/5 bg-white/5 p-1.5">
+
+          {/* Heading */}
+          <div className="rounded-xl border border-white/5 bg-white/5 p-2 text-center">
             <span className="text-[8px] uppercase tracking-wider text-zinc-400">Heading</span>
-            <div className="text-xs font-black text-amber-400">{f0(yawHeading)}°</div>
+            <div className="text-base font-black text-amber-400 tabular-nums">
+              {f0(yawHeading)}°
+            </div>
+            {/* Compass indicator */}
+            <div className="mt-1 flex justify-center">
+              <div className="h-1 w-1 rounded-full bg-amber-400/60" />
+            </div>
           </div>
         </div>
 
