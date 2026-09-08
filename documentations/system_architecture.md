@@ -1,49 +1,91 @@
 # System Architecture — Complete Layer-by-Layer Breakdown
 
-## Layer 0: Hardware (On Each Dumper)
+## Layer 0: Hardware (On Each Dumper) — Dual Compute Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  EDGE UNIT — Pi 5 8GB + Coral USB                              │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌───────┐ │
-│  │ Thermal  │ │  LiDAR   │ │  Radar   │ │ Stereo   │ │ GPS   │ │
-│  │ (I2C)    │ │ (UART)   │ │ (UART)   │ │ (CSI×2)  │ │(UART) │ │
-│  └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘ └───┬───┘ │
-│       │            │            │            │            │     │
-│       └────────────┼────────────┼────────────┼────────────┘     │
-│                    ▼            ▼            ▼                  │
-│         ┌─────────────────────────────────────────────┐        │
-│         │  SENSOR FUSION ENGINE (Python, asyncio)     │        │
-│         └────────────────────┬────────────────────────┘        │
-│                              │                                 │
-│         ┌────────────────────┼────────────────────────┐        │
-│         ▼                    ▼                         ▼        │
-│  ┌──────────────┐    ┌──────────────┐          ┌───────────┐  │
-│  │ IN-CABIN UI  │    │  V2V MESH    │          │ 3-STAGE   │  │
-│  │ (HDMI/Phone) │    │  (SPI/UART)  │          │  SAFETY   │  │
-│  └──────────────┘    └──────────────┘          └───────────┘  │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        EDGE UNIT (per dumper)                           │
+│                                                                         │
+│   ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐     │
+│   │ Thermal  │ │  LiDAR   │ │  Radar   │ │  GPS     │ │  LoRa    │     │
+│   │ (I2C)    │ │ (UART)   │ │ (UART)   │ │ (UART)   │ │ (SPI)    │     │
+│   └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘     │
+│        │            │            │            │            │            │
+│        └────────────┴────────────┴────────────┴────────────┘            │
+│                                 │                                       │
+│                    ┌────────────▼────────────┐                          │
+│                    │      ESP32-S3           │                          │
+│                    │  ┌──────────────────┐  │                          │
+│                    │  │ Core 0           │  │  Sensor aggregation      │
+│                    │  │ • LiDAR parse    │  │  ESP-NOW TX/RX           │
+│                    │  │ • Radar parse    │  │  LoRa mesh routing       │
+│                    │  │ • GPS parse      │  │  Pi SPI/UART bridge      │
+│                    │  │ • Thermal I2C    │  │                          │
+│                    │  └──────────────────┘  │                          │
+│                    │  ┌──────────────────┐  │                          │
+│                    │  │ Core 1           │  │  Safety actuation        │
+│                    │  │ • Buzzer         │  │  Watchdog                │
+│                    │  │ • Vibration      │  │  GPIO monitoring         │
+│                    │  │ • Relay (brake)  │  │  Heartbeat to Pi         │
+│                    │  │ • Status LEDs    │  │                          │
+│                    │  └──────────────────┘  │                          │
+│                    └───────────┬───────────┘                          │
+│                                │ SPI Slave / UART (high-speed)         │
+│                                ▼                                       │
+│                    ┌─────────────────────────┐                        │
+│                    │      Raspberry Pi 5     │                        │
+│                    │  • YOLOv8n Thermal      │  Perception            │
+│                    │  • Stereo SGBM          │  + Fusion              │
+│                    │  • Kalman Fusion        │                        │
+│                    │  • Safety Logic         │                        │
+│                    │  • MQTT/V2V App Logic   │                        │
+│                    │  • Cabin UI             │                        │
+│                    └─────────────────────────┘                        │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
+
+### Compute Split Summary
+
+| Component | Role | Compute |
+|-----------|------|---------|
+| **ESP32-S3** (Dual-core Xtensa 240MHz) | Sensor aggregation (LiDAR, Radar, GPS, Thermal I2C), V2V mesh (ESP-NOW + LoRa), Safety actuation (buzzer, vibration, relay, LEDs), Pi watchdog, fallback safety | Core 0: sensors + radio; Core 1: safety (100Hz deterministic) |
+| **Pi 5 8GB + Coral USB** | YOLOv8n thermal inference, Stereo SGBM, Kalman fusion, Safety logic (TTC/zones), Cabin UI, MQTT/Cloud, V2V app logic | 4 Cortex-A76 @ 2.4GHz + Coral TPU (13 TOPS INT8) |
+
+### Pi 5 Pipeline Load (with Coral)
+| Pipeline | Load | Optimization | Expected FPS |
+|----------|------|--------------|--------------|
+| Thermal YOLOv8n | ~4 GFLOPS | INT8 on Coral | 20-25 |
+| Stereo SGBM (640x480) | ~8 GOPS | NEON + ROI | 8-10 |
+| Kalman fusion (20 tracks) | Negligible | CPU | 20 |
+| Safety logic (TTC/zones) | Negligible | CPU | 20 |
+| Cabin UI (pygame) | Low | GPU | 30 |
+| MQTT + WebSocket | Low | CPU | 10 |
+| **Total** | **~12 GFLOPS sustained** | **Within Pi 5 + Coral** | **5-10 fused** |
+
+### ESP32-S3 Responsibilities
+| Core | Tasks | Rate |
+|------|-------|------|
+| **Core 0** | LiDAR UART parse, Radar UART parse, GPS UART parse, Thermal I2C read, ESP-NOW TX/RX, LoRa mesh routing, SPI/UART bridge to Pi | Event/10Hz |
+| **Core 1** | Safety actuation (buzzer, vibration, relay, LEDs), Pi heartbeat watchdog (100ms timeout), Local fallback safety (LiDAR+Radar only), GPIO monitoring | 100Hz deterministic |
 
 ---
 
 ## Sensor 1: Thermal Camera — Primary Perception
 
 ### Hardware Options
-| Model | Interface | Resolution | FOV | Range (human) | Pi Connection |
-|-------|-----------|------------|-----|---------------|---------------|
-| FLIR Lepton 3.5 | I2C + SPI (VoSPI) | 160×120 | 57° | ~200m | I2C1 + SPI0 |
-| MLX90640 | I2C | 32×24 | 110° | ~30m | I2C1 |
-| AMG8833 | I2C | 8×8 | 60° | ~7m | I2C1 |
+| Model | Interface | Resolution | FOV | Range (human) | ESP32 Connection |
+|-------|-----------|------------|-----|---------------|------------------|
+| FLIR Lepton 3.5 | I2C + SPI (VoSPI) | 160×120 | 57° | ~200m | I2C0 + SPI2 (HSPI) |
+| MLX90640 | I2C | 32×24 | 110° | ~30m | I2C0 |
+| AMG8833 | I2C | 8×8 | 60° | ~7m | I2C0 |
 
-### Software Pipeline
+### Software Pipeline — ESP32 reads, Pi infers
 ```python
-# thermal_pipeline.py
-class ThermalPipeline:
+# On ESP32-S3 (Core 0): thermal_reader.py
+class ThermalReader:
     def __init__(self, sensor_type="MLX90640"):
         self.sensor = self._init_sensor(sensor_type)
-        self.model = self._load_yolo_model()  # YOLOv8n/11n ONNX
-        self.preprocessor = ThermalPreprocessor()
+        self.spi_slave = SPISlave()  # To Pi
     
     def _init_sensor(self, sensor_type):
         if sensor_type == "FLIR_LEPTON":
@@ -56,13 +98,29 @@ class ThermalPipeline:
     def process(self):
         while True:
             raw = self.sensor.read_frame()  # (H, W) float32 °C
-            enhanced = self.preprocessor.enhance(raw)  # CLAHE + denoise
+            # Send raw to Pi via SPI (Pi does preprocessing + YOLO)
+            self.spi_slave.write(struct.pack('f'*len(raw), *raw.flatten()))
+```
+
+```python
+# On Pi 5: thermal_pipeline.py (receives raw frames from ESP32)
+class ThermalPipeline:
+    def __init__(self):
+        self.spi_master = SPIMaster()  # From ESP32
+        self.model = self._load_yolo_model()  # YOLOv8n/11n ONNX
+        self.preprocessor = ThermalPreprocessor()
+    
+    def process(self):
+        while True:
+            raw_bytes = self.spi_master.read(frame_size_bytes)
+            raw = np.frombuffer(raw_bytes, dtype=np.float32).reshape(self.sensor_shape)
+            enhanced = self.preprocessor.enhance(raw)
             upscaled = self.preprocessor.upscale(enhanced, target=(160, 120))
             detections = self.model.infer(upscaled)  # ONNX Runtime + Coral
             yield self._format_detections(detections)
 ```
 
-### Preprocessing (Critical for Low-Res Thermal)
+### Preprocessing (Critical for Low-Res Thermal) — Runs on Pi 5
 ```python
 class ThermalPreprocessor:
     def enhance(self, frame):
@@ -91,42 +149,55 @@ class ThermalPreprocessor:
 ## Sensor 2: LiDAR — 360° 3D Geometry
 
 ### Hardware
-| Model | Interface | Range | Resolution | Points/sec | Pi Connection |
-|-------|-----------|-------|------------|------------|---------------|
-| RPLidar A1M8 | UART (115200/256000) | 12m | 1° | 8000 | UART4 (GPIO 14/15) |
-| YDLIDAR X4 | UART | 10m | 0.5° | 5000 | UART4 |
+| Model | Interface | Range | Resolution | Points/sec | ESP32 Connection |
+|-------|-----------|-------|------------|------------|------------------|
+| RPLidar A1M8 | UART (115200/256000) | 12m | 1° | 8000 | UART1 (GPIO 17/18) |
+| YDLIDAR X4 | UART | 10m | 0.5° | 5000 | UART1 |
 
-### Software Pipeline
+### Software Pipeline — ESP32 parses, sends clusters to Pi
 ```python
-# lidar_pipeline.py
+# On ESP32-S3 (Core 0): lidar_pipeline.py
 class LiDARPipeline:
     def __init__(self):
-        self.lidar = RPLidarA1("/dev/ttyAMA0", baudrate=256000)
+        self.lidar = RPLidarA1(uart_num=1, baudrate=256000)
         self.clusterer = DBSCANClusterer(eps=0.3, min_samples=3)
+        self.spi_slave = SPISlave()
     
     def process(self):
         self.lidar.start_motor()
-        for scan in self.lidar.iter_scans():  # [(quality, angle_deg, dist_mm), ...]
-            # Filter noise
+        for scan in self.lidar.iter_scans():
             points = self._polar_to_cartesian(scan)
-            # Ground removal (simple height filter)
             obstacles = self._remove_ground(points)
-            # Cluster → objects
             clusters = self.clusterer.cluster(obstacles)
-            yield self._format_clusters(clusters)
+            # Send clustered objects to Pi via SPI
+            payload = self._encode_clusters(clusters)
+            self.spi_slave.write(payload)
     
     def _polar_to_cartesian(self, scan):
         angles = np.deg2rad([p[1] for p in scan])
-        dists = np.array([p[2] for p in scan]) / 1000.0  # meters
+        dists = np.array([p[2] for p in scan]) / 1000.0
         x = dists * np.cos(angles)
         y = dists * np.sin(angles)
-        z = np.zeros_like(x)  # 2D LiDAR
+        z = np.zeros_like(x)
         return np.column_stack([x, y, z])
     
     def _remove_ground(self, points):
-        # Simple: assume ground is flat at z=0, LiDAR mounted at 2m
-        # Return points with z > 0.2m (above ground noise)
         return points[points[:, 2] > 0.2]
+    
+    def _encode_clusters(self, clusters):
+        # Binary format: [count:1][obj_id:4][x:4][y:4][z:4][l:4][w:4][h:4][conf:4]...
+        pass
+```
+
+```python
+# On Pi 5: receives clusters from ESP32 via SPI
+class LiDARReceiver:
+    def __init__(self):
+        self.spi_master = SPIMaster()
+    
+    def read_clusters(self):
+        raw = self.spi_master.read()
+        return self._decode_clusters(raw)
 ```
 
 ### Output Format
@@ -145,10 +216,10 @@ class LiDARPipeline:
 ## Sensor 3: mmWave Radar — Velocity + Range
 
 ### Hardware
-| Model | Interface | Range | Velocity | Targets | Pi Connection |
-|-------|-----------|-------|----------|---------|---------------|
-| HLK-LD2450 | UART (256000) | 6m | ±10 m/s | 3 | UART5 |
-| LD2410 | UART | 6m | ±5 m/s | 1 | UART5 |
+| Model | Interface | Range | Velocity | Targets | ESP32 Connection |
+|-------|-----------|-------|----------|---------|------------------|
+| HLK-LD2450 | UART (256000) | 6m | ±10 m/s | 3 | UART2 (GPIO 19/20) |
+| LD2410 | UART | 6m | ±5 m/s | 1 | UART2 |
 
 ### Protocol (LD2450 Example)
 ```
@@ -159,29 +230,37 @@ Frame: 53 59 00 00 00 00 00 00 00 00 00 00 00 00 00 00
        └─────────── Target 1: present flag
 ```
 
-### Software Pipeline
+### Software Pipeline — ESP32 parses, sends targets to Pi
 ```python
-# radar_pipeline.py
+# On ESP32-S3 (Core 0): radar_pipeline.py
 class RadarPipeline:
-    def __init__(self, port="/dev/ttyAMA1"):
-        self.ser = serial.Serial(port, 256000, timeout=0.1)
+    def __init__(self, uart_num=2):
+        self.ser = UART(uart_num, baudrate=256000)
         self.parser = LD2450Parser()
+        self.spi_slave = SPISlave()
     
     def process(self):
         while True:
-            if self.ser.in_waiting >= 32:
+            if self.ser.any() >= 32:
                 raw = self.ser.read(32)
                 targets = self.parser.parse(raw)
-                yield self._format_targets(targets)
+                payload = self._encode_targets(targets)
+                self.spi_slave.write(payload)
     
-    def _format_targets(self, targets):
-        return [{
-            "obj_id": f"RAD_{i}",
-            "class": "moving" if t["speed"] > 0.5 else "stationary",
-            "position": {"x": t["dist"], "y": 0, "z": 0},  # Forward only
-            "velocity": {"vx": t["speed"], "vy": 0, "vz": 0},
-            "confidence": t["energy"] / 100.0
-        } for i, t in enumerate(targets) if t["present"]]
+    def _encode_targets(self, targets):
+        # Binary format for Pi
+        pass
+```
+
+```python
+# On Pi 5: receives targets from ESP32
+class RadarReceiver:
+    def __init__(self):
+        self.spi_master = SPIMaster()
+    
+    def read_targets(self):
+        raw = self.spi_master.read()
+        return self._decode_targets(raw)
 ```
 
 ---
@@ -189,9 +268,9 @@ class RadarPipeline:
 ## Sensor 4: Stereo Cameras — Road Edges + Daytime Class
 
 ### Hardware
-| Config | Interface | Resolution | FPS | Baseline | Pi Connection |
-|--------|-----------|------------|-----|----------|---------------|
-| 2× Pi Cam v3 | CSI-0, CSI-1 | 640×480 | 30 | 60-120mm | CSI ports |
+| Config | Interface | Resolution | FPS | Baseline | Connection |
+|--------|-----------|------------|-----|----------|------------|
+| 2× Pi Cam v3 | CSI-0, CSI-1 | 640×480 | 30 | 60-120mm | Pi 5 CSI ports (direct) |
 
 ### Software Pipeline
 ```python
@@ -258,52 +337,52 @@ class StereoPipeline:
 ## Sensor 5: GPS/RTK — Positioning
 
 ### Hardware
-| Model | Interface | Accuracy | Update | Pi Connection |
-|-------|-----------|----------|--------|---------------|
-| u-blox F9P (RTK) | UART + USB | 1-2 cm | 10 Hz | UART3 + USB |
-| NEO-M8N | UART | 2-3 m | 10 Hz | UART3 |
+| Model | Interface | Accuracy | Update | ESP32 Connection |
+|-------|-----------|----------|--------|------------------|
+| u-blox F9P (RTK) | UART + USB | 1-2 cm | 10 Hz | UART0 + USB (to Pi) |
+| NEO-M8N | UART | 2-3 m | 10 Hz | UART0 |
 
-### Software Pipeline
+### Software Pipeline — ESP32 parses, forwards PVT to Pi
 ```python
-# gps_pipeline.py
+# On ESP32-S3 (Core 0): gps_pipeline.py
 class GPSPipeline:
-    def __init__(self, port="/dev/ttyAMA2", rtcm_port="/dev/ttyUSB0"):
-        self.gps = serial.Serial(port, 115200, timeout=0.1)
-        self.rtcm = serial.Serial(rtcm_port, 115200) if rtcm_port else None
+    def __init__(self, uart_num=0):
+        self.gps = UART(uart_num, baudrate=115200)
         self.parser = UBXParser()
+        self.spi_slave = SPISlave()
     
     def process(self):
         while True:
-            if self.gps.in_waiting:
-                raw = self.gps.read(self.gps.in_waiting)
+            if self.gps.any():
+                raw = self.gps.read(self.gps.any())
                 pvts = self.parser.parse(raw)
                 for pvt in pvts:
-                    yield self._format_pvt(pvt)
-            
-            # Forward RTCM corrections from base station
-            if self.rtcm and self.rtcm.in_waiting:
-                self.gps.write(self.rtcm.read(self.rtcm.in_waiting))
+                    payload = self._encode_pvt(pvt)
+                    self.spi_slave.write(payload)
+
+    def _encode_pvt(self, pvt):
+        # Binary: lat, lon, alt, heading, speed, accuracy, fix_type, timestamp
+        pass
+```
+
+```python
+# On Pi 5: receives PVT from ESP32
+class GPSReceiver:
+    def __init__(self):
+        self.spi_master = SPIMaster()
     
-    def _format_pvt(self, pvt):
-        return {
-            "lat": pvt.lat,
-            "lon": pvt.lon,
-            "alt": pvt.height,
-            "heading": pvt.heading,
-            "speed": pvt.gspeed,
-            "accuracy": pvt.hacc,
-            "fix_type": pvt.fix_type,  # 3=3D, 4=RTK Fixed
-            "timestamp": time.time()
-        }
+    def read_pvt(self):
+        raw = self.spi_master.read()
+        return self._decode_pvt(raw)
 ```
 
 ---
 
-## Layer 1: Sensor Fusion (The Brain)
+## Layer 1: Sensor Fusion (The Brain) — Runs on Pi 5
 
 ### Kalman Filter Fusion Architecture
 ```python
-# fusion_engine.py
+# fusion_engine.py (runs on Pi 5)
 class SensorFusionEngine:
     def __init__(self):
         self.tracks = {}  # track_id -> KalmanTrack
@@ -388,10 +467,11 @@ class SensorFusionEngine:
 
 ---
 
-## Layer 2: Safety Logic (3-Stage)
+## Layer 2: Safety Logic — Split: Pi 5 (Decision) + ESP32 Core 1 (Actuation + Fallback)
 
+### Pi 5: Safety Decision Logic (10 Hz)
 ```python
-# safety_logic.py
+# safety_logic.py (runs on Pi 5)
 class SafetyLogic:
     def __init__(self):
         self.zones = {
@@ -410,7 +490,6 @@ class SafetyLogic:
             closing_speed = -np.dot(rel_pos, rel_vel) / (distance + 1e-6)
             ttc = distance / max(closing_speed, 0.1)
             
-            # Zone logic
             if distance < self.zones["intervene"]["distance"] or ttc < self.zones["intervene"]["ttc"]:
                 level = "intervene"
             elif distance < self.zones["alert"]["distance"] or ttc < self.zones["alert"]["ttc"]:
@@ -432,53 +511,76 @@ class SafetyLogic:
         return alerts
 ```
 
-### Actuation
-```python
-# actuator.py
-class SafetyActuator:
-    def __init__(self):
-        self.buzzer = GPIO(18)      # Active buzzer
-        self.vibration = GPIO(19)   # Haptic motor
-        self.relay_brake = GPIO(20) # Simulated brake request
-        self.leds = {"warn": 21, "alert": 22, "intervene": 23}
-    
-    def actuate(self, alerts):
-        max_level = self._max_level(alerts)
-        
-        # Reset all
-        for pin in self.leds.values():
-            GPIO.output(pin, 0)
-        self.buzzer.off()
-        self.vibration.off()
-        self.relay_brake.off()
-        
-        if max_level == "warn":
-            GPIO.output(self.leds["warn"], 1)
-            self.buzzer.beep(0.5, 1.0)  # 0.5s on, 1s off
-        elif max_level == "alert":
-            GPIO.output(self.leds["alert"], 1)
-            self.buzzer.beep(0.2, 0.3)
-            self.vibration.on()
-        elif max_level == "intervene":
-            GPIO.output(self.leds["intervene"], 1)
-            self.buzzer.on()
-            self.vibration.on()
-            self.relay_brake.on()  # Signal to CAN/brake system
+### Pi → ESP32 Command (Sent at 10 Hz via SPI/UART)
+```json
+{
+  "alert_level": "alert",           // "none" | "warn" | "alert" | "intervene"
+  "target_tracks": [...],           // For cabin display
+  "brake_request": false,           // CAN/relay signal
+  "display_mode": "thermal_fused",
+  "timestamp": 1725700000.123
+}
 ```
+
+### ESP32 Core 1: Actuation + Watchdog (100 Hz Deterministic)
+```c
+// safety_task.c (FreeRTOS task on ESP32 Core 1)
+void safety_task(void *pv) {
+    PiCommand_t pi_cmd = { .alert_level = NONE };
+    uint32_t last_pi_heartbeat = 0;
+    
+    while (1) {
+        // 1. Check Pi heartbeat (watchdog)
+        if (xTaskGetTickCount() - last_pi_heartbeat > pdMS_TO_TICKS(100)) {
+            // FALLBACK: Run minimal safety from raw LiDAR/radar (no fusion)
+            run_local_safety_fallback();
+        } else {
+            // NORMAL: Execute Pi's decision
+            execute_pi_command(pi_cmd);
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));  // 100Hz
+    }
+}
+
+void execute_pi_command(PiCommand_t *cmd) {
+    // Drive actuators per alert level
+    switch (cmd->alert_level) {
+        case WARN:
+            buzzer_beep(500, 1000);  led_set(WARN_LED, 1); break;
+        case ALERT:
+            buzzer_beep(200, 300);   led_set(ALERT_LED, 1); vibration_on(); break;
+        case INTERVENE:
+            buzzer_on();             led_set(INTERVENE_LED, 1); 
+            vibration_on();          relay_brake_on(); break;
+        default:
+            all_off();
+    }
+}
+```
+
+### Why This Split?
+| Scenario | What Happens |
+|----------|--------------|
+| **Normal** | Pi fuses → decides alert level → ESP32 drives actuators |
+| **Pi crashes/freezes** | ESP32 watchdog triggers (100ms) → runs local safety from raw LiDAR/radar → keeps buzzer/relay working |
+| **High CPU on Pi** | Safety actuation still runs on ESP32 at 100Hz, no jitter |
+| **V2V message** | ESP32 Core 0 handles instantly, doesn't wait for Pi |
+
+> **Golden Rule:** Linux (Pi) = "What should we do?" (planning, perception, fusion)  
+> **RTOS/MCU (ESP32) = "Do it now, reliably" (actuation, watchdog, radio)
 
 ---
 
-## Layer 3: V2V Mesh Communication
+## Layer 3: V2V Mesh Communication — Runs on ESP32-S3 Core 0
 
 ### ESP-NOW (Short Range)
 ```python
-# v2v_espnow.py
+# v2v_espnow.py (runs on ESP32-S3 Core 0)
 class ESPNowMesh:
     def __init__(self):
-        self.esp = ESP32_SPI()  # ESP32 as co-processor via SPI
         self.peers = {}  # mac -> vehicle_id
-        self.esp.init_espnow()
-        self.esp.register_recv_cb(self._on_recv)
+        espnow_init()
+        espnow_register_recv_cb(self._on_recv)
     
     def broadcast(self, fused_tracks, ego_state):
         msg = {
@@ -491,19 +593,18 @@ class ESPNowMesh:
             "tracks": fused_tracks,
             "fog_level": ego_state["fog_level"]
         }
-        self.esp.espnow_send(broadcast_mac, json.dumps(msg))
+        espnow_send(broadcast_mac, json.dumps(msg))
     
     def _on_recv(self, mac, data):
         msg = json.loads(data)
         if msg["type"] == "tracks":
-            # Convert to local frame
             remote_tracks = self._transform_to_local(msg["tracks"], msg["position"])
             self.incoming_queue.put(remote_tracks)
 ```
 
 ### LoRa SX1262 (Long Range)
 ```python
-# v2v_lora.py
+# v2v_lora.py (runs on ESP32-S3 Core 0)
 class LoRaMesh:
     def __init__(self):
         self.lora = SX1262(spi_bus=0, cs=8, reset=25, busy=24, dio1=23)
@@ -511,7 +612,6 @@ class LoRaMesh:
         self.routes = {}  # vehicle_id -> next_hop
     
     def broadcast(self, msg):
-        # Add hop count, TTL
         msg["hops"] = 0
         msg["ttl"] = 3
         self._send(msg)
@@ -524,23 +624,24 @@ class LoRaMesh:
         msg = json.loads(payload)
         if msg["ttl"] <= 0:
             return
-        
-        # Decrement TTL, forward
         msg["ttl"] -= 1
         msg["hops"] += 1
         self._send(msg)
-        
-        # Deliver locally
         if msg["type"] == "tracks":
             self.incoming_queue.put(msg)
 ```
 
+### Pi ↔ ESP32 V2V Interface
+- Pi sends fused tracks to ESP32 via SPI (10 Hz)
+- ESP32 broadcasts via ESP-NOW + LoRa
+- ESP32 receives from radio → forwards to Pi via SPI
+
 ---
 
-## Layer 4: In-Cabin UI (Driver Display)
+## Layer 4: In-Cabin UI (Driver Display) — Runs on Pi 5
 
 ```python
-# cabin_ui.py
+# cabin_ui.py (runs on Pi 5)
 class CabinUI:
     def __init__(self):
         self.screen = pygame.display.set_mode((1024, 600))  # 7" touch
@@ -578,6 +679,16 @@ class CabinUI:
         self.map_renderer.draw(self.screen, ego_state, fused_tracks)
         
         pygame.display.flip()
+```
+
+### Pi → ESP32 Display Data (via SPI)
+```json
+{
+  "display_mode": "thermal_fused",
+  "tracks_to_render": [...],
+  "road_edges": {...},
+  "alerts": [...]
+}
 ```
 
 ---
@@ -664,27 +775,28 @@ class DigitalTwin {
 
 ---
 
-## Data Flow Summary
+## Data Flow Summary — Dual Compute
 
 ```
 [Thermal] ──┐
-[LiDAR]  ───┼──► [Fusion Engine] ──► [Safety Logic] ──► [Actuators]
-[Radar]  ───┤         │                      │
-[Stereo] ──┘         ▼                      ▼
-              [Track List]            [3-Stage Alerts]
-                     │                      │
-                     ▼                      ▼
-              [V2V Mesh] ◄──┐         [In-Cabin UI]
-              (LoRa+ESP)   │
-                     │      │
-                     ▼      ▼
-              [MQTT Broker] ──► [FastAPI Backend] ──► [WebSocket] ──► [Dashboard + Digital Twin]
-                     │
-                     ▼
-              [PostGIS + TimescaleDB]
-                     │
-                     ▼
-              [Replay Engine] ──► [Digital Twin Time Slider]
+[LiDAR]  ───┤
+[Radar]  ───┼──► [ESP32 Core 0: Aggregation] ── SPI ──► [Pi 5: Fusion + Safety Logic]
+[GPS]    ──┤        │                           │
+[LoRa]   ──┘        ▼                           ▼
+             [ESP32 Core 1: Actuation]    [Track List] ──► [Pi: Cabin UI + MQTT]
+                  │                              │
+                  │           [V2V Mesh] ◄──────┘
+                  │           (LoRa+ESP-NOW)
+                  ▼
+             [Actuators: Buzzer, Vibe, Relay, LEDs]
+
+[Pi: MQTT Broker] ──► [FastAPI Backend] ──► [WebSocket] ──► [Dashboard + Digital Twin]
+       │
+       ▼
+[PostGIS + TimescaleDB]
+       │
+       ▼
+[Replay Engine] ──► [Digital Twin Time Slider]
 ```
 
 ---

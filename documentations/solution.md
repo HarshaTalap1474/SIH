@@ -26,22 +26,59 @@ Safe and Efficient Operation of Mine Vehicles in Fog and Low-Visibility Conditio
 | **Stereo Cameras** (2x Pi Cam v3) | Road edge detection, haul-road guidance, daytime classification | Solves "vehicle guidance" requirement explicitly |
 | **RTK-GPS** (u-blox F9P / NEO-M8N) | cm-level positioning for geo-fencing, fleet coordination | Haul-road accuracy, map matching |
 
-### Edge Compute: Raspberry Pi 5 8GB + Google Coral USB
+### Compute Split: ESP32-S3 (Sensor Hub + Safety) + Pi 5 8GB + Coral USB (AI + Fusion)
 
+| Component | Role | Compute |
+|-----------|------|---------|
+| **ESP32-S3** (Dual-core Xtensa 240MHz) | Sensor aggregation (LiDAR, Radar, GPS, Thermal I2C), V2V mesh (ESP-NOW + LoRa), Safety actuation (buzzer, vibration, relay, LEDs), Pi watchdog, fallback safety | Core 0: sensors + radio; Core 1: safety (100Hz deterministic) |
+| **Pi 5 8GB + Coral USB** | YOLOv8n thermal inference, Stereo SGBM, Kalman fusion, Safety logic (TTC/zones), Cabin UI, MQTT/Cloud, V2V app logic | 4 Cortex-A76 @ 2.4GHz + Coral TPU (13 TOPS INT8) |
+
+### Pi 5 Pipeline Load (with Coral)
 | Pipeline | Load | Optimization | Expected FPS |
 |----------|------|--------------|--------------|
 | Thermal YOLOv8n | ~4 GFLOPS | INT8 on Coral | 20-25 |
 | Stereo SGBM (640x480) | ~8 GOPS | NEON + ROI | 8-10 |
-| LiDAR clustering (360 pts) | Negligible | CPU | 20 |
-| Radar tracking | Negligible | CPU | 20 |
 | Kalman fusion (20 tracks) | Negligible | CPU | 20 |
-| V2V + MQTT | Low | CPU | 10 |
+| Safety logic (TTC/zones) | Negligible | CPU | 20 |
+| Cabin UI (pygame) | Low | GPU | 30 |
+| MQTT + WebSocket | Low | CPU | 10 |
 | **Total** | **~12 GFLOPS sustained** | **Within Pi 5 + Coral** | **5-10 fused** |
+
+### ESP32-S3 Responsibilities
+| Core | Tasks | Rate |
+|------|-------|------|
+| **Core 0** | LiDAR UART parse, Radar UART parse, GPS UART parse, Thermal I2C read, ESP-NOW TX/RX, LoRa mesh routing, SPI/UART bridge to Pi | Event/10Hz |
+| **Core 1** | Safety actuation (buzzer, vibration, relay, LEDs), Pi heartbeat watchdog (100ms timeout), Local fallback safety (LiDAR+Radar only), GPIO monitoring | 100Hz deterministic |
 
 ---
 
-## 2. Sensor Fusion (Edge)
+## 2. System Architecture — Dual Compute Split
 
+### Data Flow
+```
+[Sensors] → ESP32-S3 (aggregate) → SPI/UART → Pi 5
+                                    │
+                         ┌──────────┴──────────┐
+                         ▼                     ▼
+              [Fusion + Safety Logic]    [Cabin UI + MQTT]
+                         │
+                         ▼
+              {track_list, alert_level, commands}
+                         │
+                         ▼
+              SPI/UART → ESP32 Core 1 → Actuators
+```
+
+### Decision Split (Critical)
+| Decision Type | Where It Runs | Why |
+|---------------|---------------|-----|
+| **Perception (YOLO, stereo, fusion)** | Pi 5 | Heavy compute, Coral TPU, Python/NumPy |
+| **Safety Logic (TTC, zones, alert level)** | **Pi 5** (primary) | Full fused picture, track history |
+| **Actuation (buzzer, vibration, relay, LEDs)** | **ESP32 Core 1** only | <10ms latency, watchdog, survives Pi crash |
+| **V2V Mesh Routing** | ESP32 Core 0 | Radio stack, real-time, independent of Pi |
+| **Cloud/MQTT** | Pi 5 | TLS, JSON, WebSocket, full TCP/IP |
+
+### Sensor Fusion (on Pi 5)
 ```
 Thermal (WHAT: is it a vehicle/person/hot blob)
    + LiDAR (WHERE + DISTANCE: exact 3D position, 360 degree)
@@ -56,6 +93,9 @@ Thermal (WHAT: is it a vehicle/person/hot blob)
         v
    Collision logic (TTC, safe-distance by zone)
    -> 3-stage alerts + V2V broadcast + cloud dashboard
+        |
+        v
+   Commands sent to ESP32 for actuation
 ```
 
 **Fusion details:**
@@ -65,13 +105,19 @@ Thermal (WHAT: is it a vehicle/person/hot blob)
 
 ---
 
-## 3. Cooperative Perception (V2V Mesh)
+## 3. Cooperative Perception (V2V Mesh) — Runs on ESP32-S3 Core 0
 
 ### Dual-Protocol Design
 - **ESP-NOW** (short-range, <150m): High-frequency track sharing between nearby dumpers, backup
 - **LoRa SX1262** (long-range, 1-2km): Fleet-wide broadcast, relay through intermediate nodes, handles blind-hill corners and long haul roads
 
-### Message Format
+### ESP32 V2V Responsibilities
+- ESP-NOW peer management + broadcast (Core 0)
+- LoRa SX1262 SPI driver + mesh routing (Core 0)
+- Message serialization/deserialization
+- Forward fused tracks from Pi → radio; forward received tracks → Pi
+
+### Message Format (Pi ↔ ESP32 ↔ Radio)
 ```json
 {
   "vehicle_id": "DUMPER_042",
@@ -89,17 +135,111 @@ Thermal (WHAT: is it a vehicle/person/hot blob)
 }
 ```
 
-**Result:** Dumper A sees what Dumper B sees 200m ahead — collective situational awareness.
+**Result:** Dumper A sees what Dumper B sees 200m ahead — collective situational awareness. ESP32 handles all radio timing; Pi provides fused tracks.
 
 ---
 
-## 4. Safety Logic (3-Stage)
+## 4. Safety Logic — Split: Pi 5 (Decision) + ESP32 Core 1 (Actuation + Fallback)
 
-| Stage | Distance (TTC) | Action |
-|-------|----------------|--------|
-| **Warn**  | >50m / >8s | Visual + audio on in-cabin display |
-| **Alert** | 20-50m / 4-8s | Haptic (seat vibration) + persistent alert |
-| **Intervene** | <20m / <4s | CAN-bus brake request signal (simulated via relay) |
+### Pi 5: Safety Decision Logic (10 Hz)
+```python
+# safety_logic.py (runs on Pi 5)
+class SafetyLogic:
+    def __init__(self):
+        self.zones = {
+            "warn": {"distance": 50, "ttc": 8},
+            "alert": {"distance": 20, "ttc": 4},
+            "intervene": {"distance": 10, "ttc": 2}
+        }
+    
+    def evaluate(self, tracks, ego_speed):
+        alerts = []
+        for trk in tracks:
+            rel_pos = np.array([trk["position"]["x"], trk["position"]["y"]])
+            rel_vel = np.array([trk["velocity"]["vx"], trk["velocity"]["vy"]])
+            
+            distance = np.linalg.norm(rel_pos)
+            closing_speed = -np.dot(rel_pos, rel_vel) / (distance + 1e-6)
+            ttc = distance / max(closing_speed, 0.1)
+            
+            if distance < self.zones["intervene"]["distance"] or ttc < self.zones["intervene"]["ttc"]:
+                level = "intervene"
+            elif distance < self.zones["alert"]["distance"] or ttc < self.zones["alert"]["ttc"]:
+                level = "alert"
+            elif distance < self.zones["warn"]["distance"] or ttc < self.zones["warn"]["ttc"]:
+                level = "warn"
+            else:
+                continue
+            
+            alerts.append({
+                "track_id": trk["track_id"],
+                "level": level,
+                "distance": distance,
+                "ttc": ttc,
+                "position": trk["position"],
+                "class": trk["class"]
+            })
+        
+        return alerts
+```
+
+### Pi → ESP32 Command (Sent at 10 Hz via SPI/UART)
+```json
+{
+  "alert_level": "alert",           // "none" | "warn" | "alert" | "intervene"
+  "target_tracks": [...],           // For cabin display
+  "brake_request": false,           // CAN/relay signal
+  "display_mode": "thermal_fused",
+  "timestamp": 1725700000.123
+}
+```
+
+### ESP32 Core 1: Actuation + Watchdog (100 Hz Deterministic)
+```c
+// safety_task.c (FreeRTOS task on ESP32 Core 1)
+void safety_task(void *pv) {
+    PiCommand_t pi_cmd = { .alert_level = NONE };
+    uint32_t last_pi_heartbeat = 0;
+    
+    while (1) {
+        // 1. Check Pi heartbeat (watchdog)
+        if (xTaskGetTickCount() - last_pi_heartbeat > pdMS_TO_TICKS(100)) {
+            // FALLBACK: Run minimal safety from raw LiDAR/radar (no fusion)
+            run_local_safety_fallback();
+        } else {
+            // NORMAL: Execute Pi's decision
+            execute_pi_command(pi_cmd);
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));  // 100Hz
+    }
+}
+
+void execute_pi_command(PiCommand_t *cmd) {
+    // Drive actuators per alert level
+    switch (cmd->alert_level) {
+        case WARN:
+            buzzer_beep(500, 1000);  led_set(WARN_LED, 1); break;
+        case ALERT:
+            buzzer_beep(200, 300);   led_set(ALERT_LED, 1); vibration_on(); break;
+        case INTERVENE:
+            buzzer_on();             led_set(INTERVENE_LED, 1); 
+            vibration_on();          relay_brake_on(); break;
+        default:
+            all_off();
+    }
+}
+```
+
+### Why This Split?
+| Scenario | What Happens |
+|----------|--------------|
+| **Normal** | Pi fuses → decides alert level → ESP32 drives actuators |
+| **Pi crashes/freezes** | ESP32 watchdog triggers (100ms) → runs local safety from raw LiDAR/radar → keeps buzzer/relay working |
+| **High CPU on Pi** | Safety actuation still runs on ESP32 at 100Hz, no jitter |
+| **V2V message** | ESP32 Core 0 handles instantly, doesn't wait for Pi |
+
+> **Golden Rule:** Linux (Pi) = "What should we do?" (planning, perception, fusion)  
+> **RTOS/MCU (ESP32) = "Do it now, reliably" (actuation, watchdog, radio)
 
 ---
 
