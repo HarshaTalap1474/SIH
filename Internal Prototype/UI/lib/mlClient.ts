@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import { BLOCKERS, PHYSICS } from "./constants";
+import { BLOCKERS, PHYSICS, STOCKPILES } from "./constants";
 
 export type CollisionRisk = "SAFE" | "CAUTION" | "CRITICAL";
 
@@ -49,21 +49,29 @@ export const useAdasStore = create<AdasState>()((set) => ({
 export interface SemanticObstacleMetadata {
   readonly type: "sign_board" | "crane" | "machinery";
   readonly name: string;
+  readonly category: "big" | "small";
+  readonly targetClearance: number; // 10m for big, 5m for small
   readonly x: number;
   readonly z: number;
   readonly radius: number;
 }
 
 export const SEMANTIC_OBSTACLES: ReadonlyArray<SemanticObstacleMetadata> = [
-  // Roadside Sign Boards (from Terrain.tsx MineSign)
-  { type: "sign_board", name: "SPEED 20 Sign", x: -11, z: -40, radius: 1.4 },
-  { type: "sign_board", name: "CAUTION FOG Sign", x: 11, z: -100, radius: 1.4 },
-  { type: "sign_board", name: "HAUL ROAD Sign", x: -11, z: -160, radius: 1.4 },
-  // Construction Crane / Heavy Excavator (from Terrain.tsx Excavator)
-  { type: "crane", name: "Construction Crane / Excavator", x: -70, z: -30, radius: 4.8 },
-  // Construction Loader (from Terrain.tsx Loader)
-  { type: "machinery", name: "Construction Loader", x: 47, z: -62, radius: 3.2 },
+  // Roadside Sign Boards — Small Objects (5m target clearance)
+  { type: "sign_board", name: "SPEED 20 Sign", category: "small", targetClearance: 5.0, x: -11, z: -40, radius: 1.4 },
+  { type: "sign_board", name: "CAUTION FOG Sign", category: "small", targetClearance: 5.0, x: 11, z: -100, radius: 1.4 },
+  { type: "sign_board", name: "HAUL ROAD Sign", category: "small", targetClearance: 5.0, x: -11, z: -160, radius: 1.4 },
+  // Construction Crane / Heavy Excavator — Big Objects (10m target clearance)
+  { type: "crane", name: "Construction Crane / Excavator", category: "big", targetClearance: 10.0, x: -70, z: -30, radius: 4.8 },
+  // Construction Loader — Big Objects (10m target clearance)
+  { type: "machinery", name: "Construction Loader", category: "big", targetClearance: 10.0, x: 47, z: -62, radius: 3.2 },
 ];
+
+export interface RayHit {
+  dist: number;
+  clearance: number;
+  category: "big" | "small";
+}
 
 // Map-Aware Raycast distance calculation against obstacles and pit boundaries
 function castRay(
@@ -71,14 +79,24 @@ function castRay(
   originZ: number,
   angleRad: number,
   maxDist: number = 80
-): number {
+): RayHit {
   const dx = -Math.sin(angleRad);
   const dz = -Math.cos(angleRad);
 
   let minDist = maxDist;
+  let minClearance = 10.0;
+  let minCategory: "big" | "small" = "big";
 
   // 1. Check genuine obstacle bodies (stockpiles, boulders, machinery)
-  for (const [bx, bz, br] of BLOCKERS) {
+  // In BLOCKERS: first (STOCKPILES.length + 2) entries are large stockpiles/platform/pond (big: 10m).
+  // Entries after that are small rocks/boulders from ROCK_SPOTS (small: 5m).
+  const numBigBlockers = STOCKPILES.length + 2;
+  for (let i = 0; i < BLOCKERS.length; i++) {
+    const [bx, bz, br] = BLOCKERS[i];
+    const isSmallRock = i >= numBigBlockers;
+    const clearance = isSmallRock ? 5.0 : 10.0;
+    const category: "big" | "small" = isSmallRock ? "small" : "big";
+
     const ox = bx - originX;
     const oz = bz - originZ;
 
@@ -92,11 +110,13 @@ function castRay(
       const hitDist = proj - Math.sqrt(Math.max(0, effRadius * effRadius - perpSq));
       if (hitDist > 0 && hitDist < minDist) {
         minDist = hitDist;
+        minClearance = clearance;
+        minCategory = category;
       }
     }
   }
 
-  // 2. Check semantic non-collidable scene objects (roadside sign boards, construction cranes)
+  // 2. Check semantic non-collidable scene objects (roadside sign boards: 5m, construction cranes: 10m)
   for (const obj of SEMANTIC_OBSTACLES) {
     const ox = obj.x - originX;
     const oz = obj.z - originZ;
@@ -111,11 +131,13 @@ function castRay(
       const hitDist = proj - Math.sqrt(Math.max(0, effRadius * effRadius - perpSq));
       if (hitDist > 0 && hitDist < minDist) {
         minDist = hitDist;
+        minClearance = obj.targetClearance;
+        minCategory = obj.category;
       }
     }
   }
 
-  // 3. Pit outer mountain rim check (exact ray-circle boundary intersection)
+  // 3. Pit outer mountain rim check — Big Object (10m target clearance)
   const b = originX * dx + originZ * dz;
   const c = originX * originX + originZ * originZ - PHYSICS.arenaRadius * PHYSICS.arenaRadius;
   const disc = b * b - c;
@@ -123,10 +145,16 @@ function castRay(
     const hitDist = -b + Math.sqrt(disc);
     if (hitDist > 0 && hitDist < minDist) {
       minDist = hitDist;
+      minClearance = 10.0;
+      minCategory = "big";
     }
   }
 
-  return Math.round(minDist * 10) / 10;
+  return {
+    dist: Math.round(minDist * 10) / 10,
+    clearance: minClearance,
+    category: minCategory,
+  };
 }
 
 class ADASWebSocketClient {
@@ -246,39 +274,51 @@ class ADASWebSocketClient {
     const lateralOffset = Math.round(x * 10) / 10;
 
     const rays = {
-      farLeft: rFarLeft,
-      left: rLeft,
-      center: rCenter,
-      right: rRight,
-      farRight: rFarRight,
-      rear: rRear,
+      farLeft: rFarLeft.dist,
+      left: rLeft.dist,
+      center: rCenter.dist,
+      right: rRight.dist,
+      farRight: rFarRight.dist,
+      rear: rRear.dist,
     };
 
     useAdasStore.getState().setAdasResult({ rays });
 
     const isRev = isReversing || speed < -0.05;
 
+    // Determine closest forward threat and its obstacle clearance parameter (10m for big, 5m for small)
+    const fwdThreats = [rCenter, rLeft, rRight, rFarLeft, rFarRight];
+    let closestThreat = rCenter;
+    for (const r of fwdThreats) {
+      if (r.dist < closestThreat.dist) {
+        closestThreat = r;
+      }
+    }
+    const targetClearance = closestThreat.clearance; // 10m for big (crane, mountain), 5m for small (sign, rocks)
+
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       const payload = {
-        ray_far_left: rFarLeft,
-        ray_left: rLeft,
-        ray_center: rCenter,
-        ray_right: rRight,
-        ray_far_right: rFarRight,
-        ray_rear: rRear,
+        ray_far_left: rFarLeft.dist,
+        ray_left: rLeft.dist,
+        ray_center: rCenter.dist,
+        ray_right: rRight.dist,
+        ray_far_right: rFarRight.dist,
+        ray_rear: rRear.dist,
         speed_kmh: Math.round(speedKmh * 10) / 10,
         steer_angle: Math.round(steer * 100) / 100,
         lateral_offset: lateralOffset,
         is_reversing: isRev,
+        target_clearance: targetClearance,
+        obstacle_category: closestThreat.category,
       };
       this.ws.send(JSON.stringify(payload));
     } else {
-      // Offline safety fallback: ensure obstacle detection and AEB trigger even when offline
-      const fwdThreat = Math.min(rCenter, rLeft < 15 ? rLeft * 1.5 : 99, rRight < 15 ? rRight * 1.5 : 99);
+      // Offline safety fallback: ensure obstacle detection and AEB trigger based on clearance parameter
+      const fwdThreat = Math.min(rCenter.dist, rLeft.dist < 15 ? rLeft.dist * 1.5 : 99, rRight.dist < 15 ? rRight.dist * 1.5 : 99);
       const speedMs = speedKmh / 3.6;
-      const dReqStop = speedMs * 0.25 + (speedMs * speedMs) / (2.0 * 3.2) + 3.0;
-      const isCritical = (fwdThreat <= dReqStop && speedMs > 0.5) || fwdThreat < 4.8;
-      const isCaution = fwdThreat <= (dReqStop * 1.7 + 6.0) && fwdThreat < 45.0;
+      const dReqStop = speedMs * 0.25 + (speedMs * speedMs) / (2.0 * 3.5) + targetClearance;
+      const isCritical = ((fwdThreat <= dReqStop && speedMs > 0.4) || fwdThreat <= (targetClearance + 0.3)) && fwdThreat <= (targetClearance + 4.0);
+      const isCaution = fwdThreat <= (dReqStop * 1.4 + 4.0) && fwdThreat < (targetClearance + 18.0);
       const effectiveEBrake = isCritical && !isRev;
 
       useAdasStore.getState().setAdasResult({

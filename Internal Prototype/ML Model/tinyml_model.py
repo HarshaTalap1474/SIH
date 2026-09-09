@@ -163,12 +163,16 @@ class TinyMLCollisionModel:
         ttc = (fwd_threat_dist / max(speed_ms, 0.1)) if speed_ms > 0.5 else 99.0
         ttc = round(min(ttc, 99.0), 2)
 
-        # Physics-based stopping distance required
-        d_req_stop = (speed_ms * 0.25) + ((speed_ms ** 2) / (2.0 * 3.2)) + 3.0
-        is_in_stopping_zone = (fwd_threat_dist <= d_req_stop and speed_ms > 0.5)
-        is_imminent = fwd_threat_dist < 4.8
+        # Target obstacle clearance parameter: 10m for bigger objects (crane, mountain), 5m for smaller objects (sign board, small rocks)
+        target_clearance = float(feature_dict.get("target_clearance", 10.0))
 
-        is_critical_trigger = risk_idx == 2 or is_in_stopping_zone or is_imminent
+        # Physics-based stopping distance required ensuring vehicle stops at target clearance
+        d_req_stop = (speed_ms * 0.25) + ((speed_ms ** 2) / (2.0 * 3.5)) + target_clearance
+        is_in_stopping_zone = (fwd_threat_dist <= d_req_stop and speed_ms > 0.4)
+        is_imminent = fwd_threat_dist <= (target_clearance + 0.3)
+
+        # Trigger critical AEB when inside stopping distance or imminent clearance zone
+        is_critical_trigger = (is_in_stopping_zone or is_imminent) and fwd_threat_dist <= (target_clearance + 4.0)
         is_reversing = bool(feature_dict.get("is_reversing", False)) or float(feature_dict.get("speed_kmh", 0.0)) < -0.1
 
         # Latch AEB on critical condition
@@ -177,7 +181,7 @@ class TinyMLCollisionModel:
             self.latch_dist = fwd_threat_dist
 
         # Clear latch ONLY when driver reverses away or obstacle clearance opens significantly
-        if is_reversing or fwd_threat_dist > 30.0 or (self.aeb_latched and fwd_threat_dist > self.latch_dist + 3.0):
+        if is_reversing or fwd_threat_dist > (target_clearance + 8.0) or (self.aeb_latched and fwd_threat_dist > self.latch_dist + 2.0):
             self.aeb_latched = False
             self.latch_dist = 0.0
 
@@ -190,7 +194,7 @@ class TinyMLCollisionModel:
         elif is_critical_trigger:
             risk_idx = 2
             risk_label = "CRITICAL"
-        elif fwd_threat_dist <= (d_req_stop * 1.7 + 6.0) and fwd_threat_dist < 45.0:
+        elif fwd_threat_dist <= (d_req_stop * 1.4 + 4.0) and fwd_threat_dist < (target_clearance + 18.0):
             risk_idx = 1
             risk_label = "CAUTION"
         else:
