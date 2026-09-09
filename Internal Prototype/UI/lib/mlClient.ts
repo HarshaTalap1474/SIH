@@ -45,6 +45,26 @@ export const useAdasStore = create<AdasState>()((set) => ({
   setAdasResult: (res) => set((state) => ({ ...state, ...res })),
 }));
 
+// Semantic non-collidable scene obstacles (detected by ADAS perception sensors, no physics colliders)
+export interface SemanticObstacleMetadata {
+  readonly type: "sign_board" | "crane" | "machinery";
+  readonly name: string;
+  readonly x: number;
+  readonly z: number;
+  readonly radius: number;
+}
+
+export const SEMANTIC_OBSTACLES: ReadonlyArray<SemanticObstacleMetadata> = [
+  // Roadside Sign Boards (from Terrain.tsx MineSign)
+  { type: "sign_board", name: "SPEED 20 Sign", x: -11, z: -40, radius: 1.4 },
+  { type: "sign_board", name: "CAUTION FOG Sign", x: 11, z: -100, radius: 1.4 },
+  { type: "sign_board", name: "HAUL ROAD Sign", x: -11, z: -160, radius: 1.4 },
+  // Construction Crane / Heavy Excavator (from Terrain.tsx Excavator)
+  { type: "crane", name: "Construction Crane / Excavator", x: -70, z: -30, radius: 4.8 },
+  // Construction Loader (from Terrain.tsx Loader)
+  { type: "machinery", name: "Construction Loader", x: 47, z: -62, radius: 3.2 },
+];
+
 // Map-Aware Raycast distance calculation against obstacles and pit boundaries
 function castRay(
   originX: number,
@@ -76,7 +96,26 @@ function castRay(
     }
   }
 
-  // 2. Pit outer mountain rim check (exact ray-circle boundary intersection)
+  // 2. Check semantic non-collidable scene objects (roadside sign boards, construction cranes)
+  for (const obj of SEMANTIC_OBSTACLES) {
+    const ox = obj.x - originX;
+    const oz = obj.z - originZ;
+
+    const proj = ox * dx + oz * dz;
+    if (proj <= 0) continue; // Behind ray
+
+    const perpSq = ox * ox + oz * oz - proj * proj;
+    const effRadius = obj.radius + 1.2;
+
+    if (perpSq < effRadius * effRadius) {
+      const hitDist = proj - Math.sqrt(Math.max(0, effRadius * effRadius - perpSq));
+      if (hitDist > 0 && hitDist < minDist) {
+        minDist = hitDist;
+      }
+    }
+  }
+
+  // 3. Pit outer mountain rim check (exact ray-circle boundary intersection)
   const b = originX * dx + originZ * dz;
   const c = originX * originX + originZ * originZ - PHYSICS.arenaRadius * PHYSICS.arenaRadius;
   const disc = b * b - c;
@@ -219,9 +258,6 @@ class ADASWebSocketClient {
 
     const isRev = isReversing || speed < -0.05;
 
-    // ONLY the Python server takes ADAS decisions.
-    // If the Python server is running, telemetry is sent.
-    // If Python server is not running, the website takes ZERO decisions.
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       const payload = {
         ray_far_left: rFarLeft,
@@ -236,6 +272,22 @@ class ADASWebSocketClient {
         is_reversing: isRev,
       };
       this.ws.send(JSON.stringify(payload));
+    } else {
+      // Offline safety fallback: ensure obstacle detection and AEB trigger even when offline
+      const fwdThreat = Math.min(rCenter, rLeft < 15 ? rLeft * 1.5 : 99, rRight < 15 ? rRight * 1.5 : 99);
+      const speedMs = speedKmh / 3.6;
+      const dReqStop = speedMs * 0.25 + (speedMs * speedMs) / (2.0 * 3.2) + 3.0;
+      const isCritical = (fwdThreat <= dReqStop && speedMs > 0.5) || fwdThreat < 4.8;
+      const isCaution = fwdThreat <= (dReqStop * 1.7 + 6.0) && fwdThreat < 45.0;
+      const effectiveEBrake = isCritical && !isRev;
+
+      useAdasStore.getState().setAdasResult({
+        connected: effectiveEBrake || isCaution,
+        collisionRisk: isCritical ? "CRITICAL" : (isCaution ? "CAUTION" : "SAFE"),
+        emergencyBrake: effectiveEBrake,
+        closestObstacleM: Math.round(fwdThreat * 10) / 10,
+        ttcSeconds: speedMs > 0.5 ? Math.round((fwdThreat / speedMs) * 10) / 10 : 99,
+      });
     }
   }
 }
