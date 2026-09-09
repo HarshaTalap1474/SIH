@@ -106,12 +106,16 @@ class ADASWebSocketClient {
     this.isConnecting = true;
 
     try {
-      this.ws = new WebSocket("ws://localhost:8765/ws/telemetry");
+      const host =
+        typeof window !== "undefined" && window.location.hostname && window.location.hostname !== "localhost"
+          ? window.location.hostname
+          : "127.0.0.1";
+      this.ws = new WebSocket(`ws://${host}:8765/ws/telemetry`);
 
       this.ws.onopen = () => {
         this.isConnecting = false;
         useAdasStore.getState().setAdasResult({ connected: true });
-        console.log("[ADAS] Connected to Python TinyML Inference Server (ws://localhost:8765)");
+        console.log(`[ADAS] Connected to Python TinyML Inference Server (ws://${host}:8765)`);
       };
 
       this.ws.onmessage = (event) => {
