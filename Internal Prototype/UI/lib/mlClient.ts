@@ -14,6 +14,7 @@ export interface AdasState {
   ttcSeconds: number;
   closestObstacleM: number;
   latencyMs: number;
+  threatDirection: "FRONT" | "REAR" | "NONE";
   rays: {
     farLeft: number;
     left: number;
@@ -21,6 +22,11 @@ export interface AdasState {
     right: number;
     farRight: number;
     rear: number;
+    rearFarLeft: number;
+    rearLeft: number;
+    rearCenter: number;
+    rearRight: number;
+    rearFarRight: number;
   };
   setAdasResult: (res: Partial<AdasState>) => void;
 }
@@ -34,6 +40,7 @@ export const useAdasStore = create<AdasState>()((set) => ({
   ttcSeconds: 99,
   closestObstacleM: 80,
   latencyMs: 0,
+  threatDirection: "NONE",
   rays: {
     farLeft: 80,
     left: 80,
@@ -41,6 +48,11 @@ export const useAdasStore = create<AdasState>()((set) => ({
     right: 80,
     farRight: 80,
     rear: 80,
+    rearFarLeft: 80,
+    rearLeft: 80,
+    rearCenter: 80,
+    rearRight: 80,
+    rearFarRight: 80,
   },
   setAdasResult: (res) => set((state) => ({ ...state, ...res })),
 }));
@@ -197,6 +209,7 @@ class ADASWebSocketClient {
             ttcSeconds: res.ttc_seconds || 99,
             closestObstacleM: res.closest_obstacle_m || 80,
             latencyMs: res.inference_latency_ms || 0,
+            threatDirection: res.threat_direction || (Boolean(res.emergency_brake) ? "FRONT" : "NONE"),
           });
         } catch {
           // ignore parse error
@@ -261,13 +274,18 @@ class ADASWebSocketClient {
     const rearX = x - fx * 3.1;
     const rearZ = z - fz * 3.1;
 
-    // Compute 5 frontal distance sensor rays + 1 rear ray
+    // Compute 5 frontal distance sensor rays + 5 rear distance sensor rays
     const rFarLeft = castRay(sensorX, sensorZ, yaw + 45 * DEG);
     const rLeft = castRay(sensorX, sensorZ, yaw + 20 * DEG);
     const rCenter = castRay(sensorX, sensorZ, yaw);
     const rRight = castRay(sensorX, sensorZ, yaw - 20 * DEG);
     const rFarRight = castRay(sensorX, sensorZ, yaw - 45 * DEG);
-    const rRear = castRay(rearX, rearZ, yaw + 180 * DEG);
+
+    const rRearFarLeft = castRay(rearX, rearZ, yaw + 135 * DEG);
+    const rRearLeft = castRay(rearX, rearZ, yaw + 160 * DEG);
+    const rRearCenter = castRay(rearX, rearZ, yaw + 180 * DEG);
+    const rRearRight = castRay(rearX, rearZ, yaw - 160 * DEG);
+    const rRearFarRight = castRay(rearX, rearZ, yaw - 135 * DEG);
 
     const speedKmh = Math.abs(speed) * PHYSICS.kphPerUnit;
     // Lateral offset relative to straight haul road center (x = 0)
@@ -279,22 +297,32 @@ class ADASWebSocketClient {
       center: rCenter.dist,
       right: rRight.dist,
       farRight: rFarRight.dist,
-      rear: rRear.dist,
+      rear: rRearCenter.dist,
+      rearFarLeft: rRearFarLeft.dist,
+      rearLeft: rRearLeft.dist,
+      rearCenter: rRearCenter.dist,
+      rearRight: rRearRight.dist,
+      rearFarRight: rRearFarRight.dist,
     };
 
     useAdasStore.getState().setAdasResult({ rays });
 
     const isRev = isReversing || speed < -0.05;
+    const activeRays = isRev
+      ? [rRearCenter, rRearLeft, rRearRight, rRearFarLeft, rRearFarRight]
+      : [rCenter, rLeft, rRight, rFarLeft, rFarRight];
 
-    // Determine closest forward threat and its obstacle clearance parameter (10m for big, 5m for small)
-    const fwdThreats = [rCenter, rLeft, rRight, rFarLeft, rFarRight];
-    let closestThreat = rCenter;
-    for (const r of fwdThreats) {
-      if (r.dist < closestThreat.dist) {
-        closestThreat = r;
-      }
-    }
-    const targetClearance = closestThreat.clearance; // 10m for big (crane, mountain), 5m for small (sign, rocks)
+    const activeThreat = activeRays.reduce((min, r) => (r.dist < min.dist ? r : min));
+    const [c, l, r] = activeRays;
+    const activeThreatDist = Math.min(c.dist, l.dist < 15 ? l.dist * 1.5 : 99, r.dist < 15 ? r.dist * 1.5 : 99);
+    const rearThreatDist = Math.min(rRearCenter.dist, rRearLeft.dist < 15 ? rRearLeft.dist * 1.5 : 99, rRearRight.dist < 15 ? rRearRight.dist * 1.5 : 99);
+    const targetClearance = activeThreat.clearance; // 10m for big, 5m for small
+
+    const speedMs = speedKmh / 3.6;
+    const dReqStop = speedMs * 0.25 + (speedMs * speedMs) / (2.0 * 3.5) + targetClearance;
+    const isCritical = ((activeThreatDist <= dReqStop && speedMs > 0.3) || activeThreatDist <= (targetClearance + 0.3)) && activeThreatDist <= (targetClearance + 4.0);
+    const isCaution = activeThreatDist <= (dReqStop * 1.4 + 4.0) && activeThreatDist < (targetClearance + 18.0);
+    const activeTtc = speedMs > 0.4 ? Math.round((activeThreatDist / speedMs) * 10) / 10 : 99;
 
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       const payload = {
@@ -303,30 +331,24 @@ class ADASWebSocketClient {
         ray_center: rCenter.dist,
         ray_right: rRight.dist,
         ray_far_right: rFarRight.dist,
-        ray_rear: rRear.dist,
+        ray_rear: Math.round(rearThreatDist * 10) / 10,
         speed_kmh: Math.round(speedKmh * 10) / 10,
         steer_angle: Math.round(steer * 100) / 100,
         lateral_offset: lateralOffset,
         is_reversing: isRev,
         target_clearance: targetClearance,
-        obstacle_category: closestThreat.category,
+        obstacle_category: activeThreat.category,
       };
       this.ws.send(JSON.stringify(payload));
     } else {
-      // Offline safety fallback: ensure obstacle detection and AEB trigger based on clearance parameter
-      const fwdThreat = Math.min(rCenter.dist, rLeft.dist < 15 ? rLeft.dist * 1.5 : 99, rRight.dist < 15 ? rRight.dist * 1.5 : 99);
-      const speedMs = speedKmh / 3.6;
-      const dReqStop = speedMs * 0.25 + (speedMs * speedMs) / (2.0 * 3.5) + targetClearance;
-      const isCritical = ((fwdThreat <= dReqStop && speedMs > 0.4) || fwdThreat <= (targetClearance + 0.3)) && fwdThreat <= (targetClearance + 4.0);
-      const isCaution = fwdThreat <= (dReqStop * 1.4 + 4.0) && fwdThreat < (targetClearance + 18.0);
-      const effectiveEBrake = isCritical && !isRev;
-
+      // Offline safety fallback: full front + rear obstacle detection and AEB trigger
       useAdasStore.getState().setAdasResult({
-        connected: effectiveEBrake || isCaution,
+        connected: isCritical || isCaution,
         collisionRisk: isCritical ? "CRITICAL" : (isCaution ? "CAUTION" : "SAFE"),
-        emergencyBrake: effectiveEBrake,
-        closestObstacleM: Math.round(fwdThreat * 10) / 10,
-        ttcSeconds: speedMs > 0.5 ? Math.round((fwdThreat / speedMs) * 10) / 10 : 99,
+        emergencyBrake: isCritical,
+        threatDirection: isCritical || isCaution ? (isRev ? "REAR" : "FRONT") : "NONE",
+        closestObstacleM: Math.round(activeThreatDist * 10) / 10,
+        ttcSeconds: activeTtc,
       });
     }
   }

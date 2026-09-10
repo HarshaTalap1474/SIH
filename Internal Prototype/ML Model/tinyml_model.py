@@ -148,53 +148,53 @@ class TinyMLCollisionModel:
         risk_confidence = float(prob_risk[0][risk_idx])
 
         speed_ms = max(0.0, float(feature_dict.get("speed_kmh", 0.0))) / 3.6
-        ray_l = float(feature_dict.get("ray_left", 50.0))
-        ray_c = float(feature_dict.get("ray_center", 50.0))
-        ray_r = float(feature_dict.get("ray_right", 50.0))
+        is_reversing = bool(feature_dict.get("is_reversing", False)) or float(feature_dict.get("speed_kmh", 0.0)) < -0.1
 
-        # Forward trajectory threat distance
-        fwd_threat_dist = min(
-            ray_c,
-            ray_l * 1.5 if ray_l < 15.0 else 99.0,
-            ray_r * 1.5 if ray_r < 15.0 else 99.0,
-        )
-
-        # Physics-based Time-to-Collision along vehicle travel trajectory
-        ttc = (fwd_threat_dist / max(speed_ms, 0.1)) if speed_ms > 0.5 else 99.0
-        ttc = round(min(ttc, 99.0), 2)
+        if is_reversing:
+            threat_dist = float(feature_dict.get("ray_rear", 50.0))
+        else:
+            ray_l = float(feature_dict.get("ray_left", 50.0))
+            ray_c = float(feature_dict.get("ray_center", 50.0))
+            ray_r = float(feature_dict.get("ray_right", 50.0))
+            threat_dist = min(
+                ray_c,
+                ray_l * 1.5 if ray_l < 15.0 else 99.0,
+                ray_r * 1.5 if ray_r < 15.0 else 99.0,
+            )
 
         # Target obstacle clearance parameter: 10m for bigger objects (crane, mountain), 5m for smaller objects (sign board, small rocks)
         target_clearance = float(feature_dict.get("target_clearance", 10.0))
 
+        # Physics-based Time-to-Collision along vehicle travel trajectory
+        ttc_speed_min = 0.4 if is_reversing else 0.5
+        ttc = (threat_dist / max(speed_ms, 0.1)) if speed_ms > ttc_speed_min else 99.0
+        ttc = round(min(ttc, 99.0), 2)
+
         # Physics-based stopping distance required ensuring vehicle stops at target clearance
         d_req_stop = (speed_ms * 0.25) + ((speed_ms ** 2) / (2.0 * 3.5)) + target_clearance
-        is_in_stopping_zone = (fwd_threat_dist <= d_req_stop and speed_ms > 0.4)
-        is_imminent = fwd_threat_dist <= (target_clearance + 0.3)
+        stop_speed_min = 0.3 if is_reversing else 0.4
+        is_in_stopping_zone = (threat_dist <= d_req_stop and speed_ms > stop_speed_min)
+        is_imminent = threat_dist <= (target_clearance + 0.3)
+        is_critical_trigger = (is_in_stopping_zone or is_imminent) and threat_dist <= (target_clearance + 4.0)
 
-        # Trigger critical AEB when inside stopping distance or imminent clearance zone
-        is_critical_trigger = (is_in_stopping_zone or is_imminent) and fwd_threat_dist <= (target_clearance + 4.0)
-        is_reversing = bool(feature_dict.get("is_reversing", False)) or float(feature_dict.get("speed_kmh", 0.0)) < -0.1
+        if is_reversing:
+            effective_e_brake = is_critical_trigger
+        else:
+            if is_critical_trigger and not self.aeb_latched:
+                self.aeb_latched = True
+                self.latch_dist = threat_dist
 
-        # Latch AEB on critical condition
-        if is_critical_trigger and not self.aeb_latched and not is_reversing:
-            self.aeb_latched = True
-            self.latch_dist = fwd_threat_dist
+            if threat_dist > (target_clearance + 8.0) or (self.aeb_latched and threat_dist > self.latch_dist + 2.0):
+                self.aeb_latched = False
+                self.latch_dist = 0.0
 
-        # Clear latch ONLY when driver reverses away or obstacle clearance opens significantly
-        if is_reversing or fwd_threat_dist > (target_clearance + 8.0) or (self.aeb_latched and fwd_threat_dist > self.latch_dist + 2.0):
-            self.aeb_latched = False
-            self.latch_dist = 0.0
+            effective_e_brake = self.aeb_latched
 
-        effective_e_brake = self.aeb_latched and not is_reversing
-
-        if effective_e_brake:
+        if effective_e_brake or is_critical_trigger:
             risk_idx = 2
             risk_label = "CRITICAL"
-            risk_confidence = max(risk_confidence, 0.99)
-        elif is_critical_trigger:
-            risk_idx = 2
-            risk_label = "CRITICAL"
-        elif fwd_threat_dist <= (d_req_stop * 1.4 + 4.0) and fwd_threat_dist < (target_clearance + 18.0):
+            risk_confidence = 0.99 if is_reversing else max(risk_confidence, 0.99)
+        elif threat_dist <= (d_req_stop * 1.4 + 4.0) and threat_dist < (target_clearance + 18.0):
             risk_idx = 1
             risk_label = "CAUTION"
         else:
@@ -211,7 +211,8 @@ class TinyMLCollisionModel:
             "brake_intensity": round(1.0 if effective_e_brake else (0.35 if risk_idx == 1 else 0.0), 3),
             "steering_guidance": round(steer_val, 3),
             "ttc_seconds": ttc,
-            "closest_obstacle_m": round(fwd_threat_dist, 2),
+            "closest_obstacle_m": round(threat_dist, 2),
+            "threat_direction": "REAR" if (is_reversing and risk_idx > 0) else ("FRONT" if risk_idx > 0 else "NONE"),
         }
 
     def save(self, filepath: str):
