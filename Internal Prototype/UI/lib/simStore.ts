@@ -55,10 +55,10 @@ export const useSim = create<SimStore>()((set) => ({
     const gear: GearMode = passedGear || (boost
       ? "B"
       : speed > 0.15
-      ? "D"
-      : speed < -0.15
-      ? "R"
-      : "P");
+        ? "D"
+        : speed < -0.15
+          ? "R"
+          : "P");
 
     set({
       x,
