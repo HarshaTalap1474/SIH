@@ -93,14 +93,23 @@ export function Controls() {
     const adas = useAdasStore.getState();
 
     // Autonomous Emergency Brake & E-Stop Interlock
-    // AEB acts strictly when Python TinyML server is connected and commands emergencyBrake: true
+    // Front AEB triggers when moving forward toward an obstacle
+    // Rear AEB triggers when reversing toward an obstacle
     const isEStopped = estopLatched.current;
-    const isAebActive = adas.connected && adas.emergencyBrake && !isReversing;
-    const isBlockedAhead = isEStopped || isAebActive;
+    const isAebForward = adas.emergencyBrake && !isReversing;
+    const isAebRear = adas.emergencyBrake && isReversing;
+
+    const isBlockedAhead = isEStopped || isAebForward;
+    const isBlockedBehind = isEStopped || isAebRear;
 
     let throttle = keyThrottle;
-    if (isBlockedAhead && throttle > 0) {
-      throttle = 0; // Cut forward throttle completely
+    if (isBlockedAhead) {
+      if (throttle > 0) throttle = 0;
+      if (speed > 0) speed = Math.max(0, speed - PHYSICS.brake * 4.0 * dt);
+    }
+    if (isBlockedBehind) {
+      if (throttle < 0) throttle = 0;
+      if (speed < 0) speed = Math.min(0, speed + PHYSICS.brake * 4.0 * dt);
     }
 
     const maxSpeed = boost
@@ -110,20 +119,13 @@ export function Controls() {
         : PHYSICS.reverseMaxSpeed;
     const target = throttle * maxSpeed;
 
-    if (isBlockedAhead) {
-      // Rapidly bring speed to 0 and hold strictly at 0
-      if (speed > 0.01) {
-        speed = Math.max(0, speed - PHYSICS.brake * 4.0 * dt);
-      } else {
-        speed = 0;
-      }
-    } else if (Math.abs(throttle) > PHYSICS.throttleDeadzone) {
+    if (Math.abs(throttle) > PHYSICS.throttleDeadzone) {
       if (target > speed) {
         speed = Math.min(target, speed + PHYSICS.accel * dt);
       } else {
         speed = Math.max(target, speed - PHYSICS.brake * dt);
       }
-    } else {
+    } else if (!(isBlockedAhead && speed > 0) && !(isBlockedBehind && speed < 0)) {
       const dir = Math.sign(speed);
       speed -= dir * Math.min(Math.abs(speed), PHYSICS.coastDecel * dt);
       if (Math.sign(speed) !== dir) speed = 0;

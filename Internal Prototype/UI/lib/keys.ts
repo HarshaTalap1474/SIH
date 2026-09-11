@@ -5,6 +5,7 @@ interface KeyHandlers {
   onR?: () => void;
   onH?: () => void;
   onF?: () => void;
+  onT?: () => void;
 }
 
 let handlers: KeyHandlers = {};
@@ -31,6 +32,7 @@ export function initKeys(nextHandlers: KeyHandlers) {
     if (e.code === "KeyR") handlers.onR?.();
     if (e.code === "KeyH") handlers.onH?.();
     if (e.code === "KeyF") handlers.onF?.();
+    if (e.code === "KeyT") handlers.onT?.();
   };
 
   const up = (e: KeyboardEvent) => pressed.delete(e.code);

@@ -1,30 +1,58 @@
 "use client";
 
-import { Canvas } from "@react-three/fiber";
-import { SCENE } from "@/lib/constants";
+import { useRef } from "react";
+import { Canvas, useFrame } from "@react-three/fiber";
+import * as THREE from "three";
+import { SCENE, damp } from "@/lib/constants";
 import { Dumper } from "./Dumper";
 import { Controls } from "./Controls";
 import { CameraRig } from "./CameraRig";
 import { Terrain } from "./Terrain";
+import { Rain } from "./Rain";
+import { VolumetricFog } from "./VolumetricFog";
 import { useSim } from "@/lib/simStore";
 import { silenceThreeClockWarning } from "@/lib/threeWarnings";
 
 silenceThreeClockWarning();
 
-function FogEnvironment() {
-  const fogMode = useSim((s) => s.fogMode);
+const targetColorObj = new THREE.Color();
+const FOG_DENSITIES = { heavy: 0.0285, medium: 0.0165, clear: 0.0055 } as const;
+const RAIN_HAZES = { high: 0.008, medium: 0.0035, none: 0.0 } as const;
 
-  const [fogNear, fogFar] =
-    fogMode === "heavy"
-      ? [18, 120]
-      : fogMode === "medium"
-      ? [45, 200]
-      : [120, 450];
+function FogEnvironment() {
+  const fogRef = useRef<THREE.FogExp2>(null);
+  const bgRef = useRef<THREE.Color>(null);
+
+  useFrame((_, delta) => {
+    const dt = Math.min(delta, 0.05);
+    const { fogMode, rainMode } = useSim.getState();
+
+    const targetDensity = FOG_DENSITIES[fogMode] + RAIN_HAZES[rainMode];
+    const targetHex =
+      rainMode === "high"
+        ? "#121519"
+        : rainMode === "medium"
+        ? "#17191d"
+        : fogMode === "heavy"
+        ? "#1e1b19"
+        : SCENE.background;
+
+    targetColorObj.set(targetHex);
+
+    const lerpFactor = 1 - Math.exp(-3.0 * dt);
+    if (fogRef.current) {
+      fogRef.current.density = damp(fogRef.current.density, targetDensity, 3.0, dt);
+      fogRef.current.color.lerp(targetColorObj, lerpFactor);
+    }
+    if (bgRef.current) {
+      bgRef.current.lerp(targetColorObj, lerpFactor);
+    }
+  });
 
   return (
     <>
-      <color attach="background" args={[SCENE.background]} />
-      <fog attach="fog" args={[SCENE.fogColor, fogNear, fogFar]} />
+      <color ref={bgRef} attach="background" args={[SCENE.background]} />
+      <fogExp2 ref={fogRef} attach="fog" args={[SCENE.background, 0.022]} />
     </>
   );
 }
@@ -61,6 +89,8 @@ export function Scene() {
       <ambientLight intensity={0.35} />
 
       <Terrain />
+      <VolumetricFog />
+      <Rain />
       <Dumper />
       <Controls />
       <CameraRig />

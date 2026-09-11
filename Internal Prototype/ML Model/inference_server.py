@@ -22,6 +22,13 @@ CYAN = "\033[96m"
 BOLD = "\033[1m"
 RESET = "\033[0m"
 
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 PORT = 8765
 WEIGHTS_PATH = os.path.join(os.path.dirname(__file__), "tinyml_weights.npz")
 
@@ -73,41 +80,44 @@ class ADASInferenceServer:
                 await websocket.send(json.dumps(decision))
 
                 # Terminal telemetry logging (log every status transition or periodic heartbeat)
-                current_status = decision["collision_risk"]
-                speed = data.get("speed_kmh", 0.0)
-                dist = decision["closest_obstacle_m"]
-                ttc = decision["ttc_seconds"]
-                e_brake = decision["emergency_brake"]
-                steer = decision["steering_guidance"]
+                try:
+                    current_status = decision["collision_risk"]
+                    speed = data.get("speed_kmh", 0.0)
+                    dist = decision["closest_obstacle_m"]
+                    ttc = decision["ttc_seconds"]
+                    e_brake = decision["emergency_brake"]
+                    steer = decision["steering_guidance"]
 
-                if e_brake and self.last_status != "CRITICAL":
-                    self.total_interventions += 1
+                    if e_brake and self.last_status != "CRITICAL":
+                        self.total_interventions += 1
 
-                now = time.time()
-                status_changed = (current_status != self.last_status)
-                heartbeat = (now - self.last_log_time) > 1.2
+                    now = time.time()
+                    status_changed = (current_status != self.last_status)
+                    heartbeat = (now - self.last_log_time) > 1.2
 
-                if status_changed or heartbeat or e_brake:
-                    self.last_status = current_status
-                    self.last_log_time = now
+                    if status_changed or heartbeat or e_brake:
+                        self.last_status = current_status
+                        self.last_log_time = now
 
-                    if current_status == "CRITICAL":
-                        badge = f"{RED}{BOLD}● CRITICAL [AEB BRAKE ACTIVE]{RESET}"
-                    elif current_status == "CAUTION":
-                        badge = f"{YELLOW}{BOLD}▲ CAUTION  [OBSTACLE NEAR]{RESET}"
-                    else:
-                        badge = f"{GREEN}✔ SAFE     [ROAD CLEAR]{RESET}"
+                        if current_status == "CRITICAL":
+                            badge = f"{RED}{BOLD}* CRITICAL [AEB BRAKE ACTIVE]{RESET}"
+                        elif current_status == "CAUTION":
+                            badge = f"{YELLOW}{BOLD}^ CAUTION  [OBSTACLE NEAR]{RESET}"
+                        else:
+                            badge = f"{GREEN}[OK] SAFE  [ROAD CLEAR]{RESET}"
 
-                    steer_arrow = "◄ LEFT" if steer < -0.15 else ("RIGHT ►" if steer > 0.15 else "AHEAD ▲")
+                        steer_arrow = "< LEFT" if steer < -0.15 else ("RIGHT >" if steer > 0.15 else "AHEAD ^")
 
-                    print(
-                        f"[{time.strftime('%H:%M:%S')}] {badge} | "
-                        f"Speed: {speed:4.1f} km/h | "
-                        f"Dist: {dist:4.1f}m | "
-                        f"TTC: {ttc:4.1f}s | "
-                        f"Steer Assist: {steer_arrow:7s} | "
-                        f"Latency: {t_elapsed_ms * 1000:4.1f}µs"
-                    )
+                        print(
+                            f"[{time.strftime('%H:%M:%S')}] {badge} | "
+                            f"Speed: {speed:4.1f} km/h | "
+                            f"Dist: {dist:4.1f}m | "
+                            f"TTC: {ttc:4.1f}s | "
+                            f"Steer Assist: {steer_arrow:7s} | "
+                            f"Latency: {t_elapsed_ms * 1000:4.1f}us"
+                        )
+                except Exception:
+                    pass
 
         except websockets.exceptions.ConnectionClosed:
             print(f"\n{YELLOW}[-] 3D UI Client Disconnected.{RESET}")
