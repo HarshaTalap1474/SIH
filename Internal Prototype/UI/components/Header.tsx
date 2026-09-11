@@ -9,9 +9,11 @@ export function Header() {
   const camMode = useSim((s) => s.camMode);
   const headlights = useSim((s) => s.headlights);
   const fogMode = useSim((s) => s.fogMode);
+  const rainMode = useSim((s) => s.rainMode);
   const toggleCam = useSim((s) => s.toggleCam);
   const toggleHeadlights = useSim((s) => s.toggleHeadlights);
   const toggleFog = useSim((s) => s.toggleFog);
+  const toggleRain = useSim((s) => s.toggleRain);
   const resetSim = useSim((s) => s.resetSim);
 
   // ADAS Store
@@ -130,6 +132,22 @@ export function Header() {
             className="cursor-pointer rounded-lg px-2.5 py-1 font-mono text-[10px] font-bold text-zinc-300 transition-all hover:bg-white/10 hover:text-white active:scale-95 capitalize"
           >
             🌫 {fogMode}
+          </button>
+
+          {/* Rain Environment Control */}
+          <button
+            type="button"
+            onClick={toggleRain}
+            title="Cycle Rain Intensity (T)"
+            className={`cursor-pointer rounded-lg px-2.5 py-1 font-mono text-[10px] font-bold transition-all active:scale-95 uppercase ${
+              rainMode === "high"
+                ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 shadow-[0_0_8px_rgba(6,182,212,0.3)]"
+                : rainMode === "medium"
+                ? "bg-blue-500/20 text-blue-300 border border-blue-500/30 shadow-[0_0_8px_rgba(59,130,246,0.25)]"
+                : "text-zinc-300 hover:bg-white/10 hover:text-white"
+            }`}
+          >
+            🌧 {rainMode === "none" ? "NO RAIN" : rainMode === "medium" ? "MEDIUM RAIN" : "HIGH RAIN"}
           </button>
         </div>
 

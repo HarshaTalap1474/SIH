@@ -3,6 +3,7 @@ import { PHYSICS, START_POS } from "./constants";
 
 export type CamMode = "chase" | "top" | "cockpit";
 export type FogMode = "heavy" | "medium" | "clear";
+export type RainMode = "none" | "medium" | "high";
 export type GearMode = "P" | "R" | "N" | "D" | "B";
 
 interface SimStore {
@@ -17,6 +18,7 @@ interface SimStore {
   gear: GearMode;
   headlights: boolean;
   fogMode: FogMode;
+  rainMode: RainMode;
   setFrame: (s: {
     x: number;
     z: number;
@@ -30,6 +32,7 @@ interface SimStore {
   setCamMode: (mode: CamMode) => void;
   toggleHeadlights: () => void;
   toggleFog: () => void;
+  toggleRain: () => void;
   resetSim: () => void;
 }
 
@@ -45,6 +48,7 @@ export const useSim = create<SimStore>()((set) => ({
   gear: "P",
   headlights: true,
   fogMode: "heavy",
+  rainMode: "none",
 
   setFrame: ({ x, z, yaw, speed, steer, boost, gear: passedGear }) => {
     const speedKmh = Math.round(Math.abs(speed) * PHYSICS.kphPerUnit);
@@ -84,6 +88,13 @@ export const useSim = create<SimStore>()((set) => ({
       const modes: FogMode[] = ["heavy", "medium", "clear"];
       const nextIdx = (modes.indexOf(s.fogMode) + 1) % modes.length;
       return { fogMode: modes[nextIdx] };
+    }),
+
+  toggleRain: () =>
+    set((s) => {
+      const modes: RainMode[] = ["none", "medium", "high"];
+      const nextIdx = (modes.indexOf(s.rainMode) + 1) % modes.length;
+      return { rainMode: modes[nextIdx] };
     }),
 
   resetSim: () =>

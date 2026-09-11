@@ -15,6 +15,7 @@ export default function Page() {
       onR: () => useSim.getState().resetSim(),
       onH: () => useSim.getState().toggleHeadlights(),
       onF: () => useSim.getState().toggleFog(),
+      onT: () => useSim.getState().toggleRain(),
     });
   }, []);
 

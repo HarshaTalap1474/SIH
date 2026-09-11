@@ -9,6 +9,7 @@ import {
   SCENE,
   STOCKPILES,
 } from "@/lib/constants";
+import { useSim } from "@/lib/simStore";
 
 
 
@@ -183,7 +184,16 @@ function Excavator({ x, z, rot }: { x: number; z: number; rot: number }) {
 
 const RAMP_TILT = Math.atan(5 / 16);
 
+const ROAD_RAIN_STYLES = {
+  high: { roadColor: "#1a1614", roadRough: 0.28, roadMetal: 0.42, rutColor: "#140f0c", rutRough: 0.16, rutMetal: 0.55 },
+  medium: { roadColor: "#251f1c", roadRough: 0.52, roadMetal: 0.22, rutColor: "#1e1814", rutRough: 0.36, rutMetal: 0.32 },
+  none: { roadColor: SCENE.roadColor, roadRough: 0.92, roadMetal: 0.02, rutColor: "#261f1a", rutRough: 0.96, rutMetal: 0.02 },
+} as const;
+
 export function Terrain() {
+  const rainMode = useSim((s) => s.rainMode);
+  const roadStyle = ROAD_RAIN_STYLES[rainMode];
+
   return (
     <group>
       {/* Base Quarry Pit Floor — Solid 3D Base */}
@@ -197,21 +207,27 @@ export function Terrain() {
         <Patch key={`p${i}`} x={x} z={z} sx={sx} sz={sz} />
       ))}
 
-      {/* Main 18m Wide Unpaved Haul Road */}
+      {/* Main 18m Wide Unpaved Haul Road (Dynamically wet in rain) */}
       <mesh position={[0, 0.04, 0]} receiveShadow>
         <boxGeometry args={[18, 0.08, 380]} />
-        <meshStandardMaterial color={SCENE.roadColor} roughness={0.92} />
+        <meshStandardMaterial
+          color={roadStyle.roadColor}
+          roughness={roadStyle.roadRough}
+          metalness={roadStyle.roadMetal}
+        />
       </mesh>
 
-      {/* Compacted Heavy Tire Track Ruts on Haul Road */}
-      <mesh position={[-3.6, 0.042, 0]} receiveShadow>
-        <boxGeometry args={[2.4, 0.082, 380]} />
-        <meshStandardMaterial color="#261f1a" roughness={0.96} />
-      </mesh>
-      <mesh position={[3.6, 0.042, 0]} receiveShadow>
-        <boxGeometry args={[2.4, 0.082, 380]} />
-        <meshStandardMaterial color="#261f1a" roughness={0.96} />
-      </mesh>
+      {/* Compacted Heavy Tire Track Ruts on Haul Road (Standing water / sheen) */}
+      {[-3.6, 3.6].map((x) => (
+        <mesh key={x} position={[x, 0.042, 0]} receiveShadow>
+          <boxGeometry args={[2.4, 0.082, 380]} />
+          <meshStandardMaterial
+            color={roadStyle.rutColor}
+            roughness={roadStyle.rutRough}
+            metalness={roadStyle.rutMetal}
+          />
+        </mesh>
+      ))}
 
       {/* High-Visibility Road Edge Guides (Visual Lane Markers) */}
       <mesh position={[-8.4, 0.085, 0]}>
