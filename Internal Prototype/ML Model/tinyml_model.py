@@ -162,8 +162,8 @@ class TinyMLCollisionModel:
                 ray_r * 1.5 if ray_r < 15.0 else 99.0,
             )
 
-        # Target obstacle clearance parameter: 10m for bigger objects (crane, mountain), 5m for smaller objects (sign board, small rocks)
-        target_clearance = float(feature_dict.get("target_clearance", 10.0))
+        # Target obstacle clearance parameter: 2.5m target stop clearance
+        target_clearance = float(feature_dict.get("target_clearance", 2.5))
 
         # Physics-based Time-to-Collision along vehicle travel trajectory
         ttc_speed_min = 0.4 if is_reversing else 0.5
@@ -171,10 +171,10 @@ class TinyMLCollisionModel:
         ttc = round(min(ttc, 99.0), 2)
 
         # Physics-based stopping distance required ensuring vehicle stops at target clearance
-        d_req_stop = (speed_ms * 0.25) + ((speed_ms ** 2) / (2.0 * 3.5)) + target_clearance
-        stop_speed_min = 0.3 if is_reversing else 0.4
-        is_in_stopping_zone = (threat_dist <= d_req_stop and speed_ms > stop_speed_min)
-        is_imminent = threat_dist <= (target_clearance + 0.3)
+        d_req_stop = (speed_ms * 0.25) + ((speed_ms ** 2) / (2.0 * 8.0)) + 0.5
+        is_in_stopping_zone = (threat_dist <= d_req_stop and speed_ms > 2.0)
+        is_stopped_at_safety = threat_dist <= (target_clearance + 0.25) and speed_ms <= 0.3
+        is_imminent = (threat_dist <= (target_clearance + 0.05)) or is_stopped_at_safety
         is_critical_trigger = (is_in_stopping_zone or is_imminent) and threat_dist <= (target_clearance + 4.0)
 
         if is_reversing:

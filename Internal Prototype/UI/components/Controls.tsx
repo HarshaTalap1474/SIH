@@ -92,24 +92,61 @@ export function Controls() {
     adasClient.update(x, z, yaw, speed, steer, isReversing);
     const adas = useAdasStore.getState();
 
-    // Autonomous Emergency Brake & E-Stop Interlock
-    // Front AEB triggers when moving forward toward an obstacle
-    // Rear AEB triggers when reversing toward an obstacle
+    // Obstacle clearance measurements in travel direction using existing sensor perception
+    const STOP_CLEARANCE = 2.5;  // 2.5 meters actual obstacle clearance stop distance
+    // Dynamic braking range: in Boost mode, start gradual deceleration at 28m to allow smooth progressive slowing from 75 km/h
+    const isBoostActive = boost || Math.abs(speed) > PHYSICS.normalMaxSpeed;
+    const slowClearance = isBoostActive ? 28.0 : 10.0;
+
+    // Forward threat clearance: front center ray and front left/right angled rays
+    const frontRayDist = Math.min(
+      adas.rays.center,
+      adas.rays.left < 15 ? adas.rays.left * 1.3 : 99,
+      adas.rays.right < 15 ? adas.rays.right * 1.3 : 99
+    );
+    const forwardClearance = !isReversing
+      ? Math.min(adas.closestObstacleM, frontRayDist)
+      : frontRayDist;
+
+    // Rear threat clearance: rear center ray and rear left/right angled rays
+    const rearCenterRay = adas.rays.rearCenter ?? adas.rays.rear ?? 99;
+    const rearRayDist = Math.min(
+      rearCenterRay,
+      adas.rays.rearLeft < 15 ? adas.rays.rearLeft * 1.3 : 99,
+      adas.rays.rearRight < 15 ? adas.rays.rearRight * 1.3 : 99
+    );
+    const rearClearance = isReversing
+      ? Math.min(adas.closestObstacleM, rearRayDist)
+      : rearRayDist;
+
+    // Critical 2.5-meter stop zones (safety stopping threshold: 2.50m - 2.65m)
+    const isStopZoneAhead = forwardClearance <= STOP_CLEARANCE + 0.15;
+    const isStopZoneBehind = rearClearance <= STOP_CLEARANCE + 0.15;
+
+    // Obstacle safety stop detection (truck has reached 0 km/h specifically because obstacle safety stopped it)
+    const isObstacleSafetyStoppedAhead = isStopZoneAhead && speed <= 0.1 && !isReversing;
+    const isObstacleSafetyStoppedBehind = isStopZoneBehind && speed >= -0.1 && isReversing;
+    const isObstacleSafetyStopped = isObstacleSafetyStoppedAhead || isObstacleSafetyStoppedBehind;
+
+    // Autonomous Emergency Brake & E-Stop Interlock (final safety layer)
     const isEStopped = estopLatched.current;
-    const isAebForward = adas.emergencyBrake && !isReversing;
-    const isAebRear = adas.emergencyBrake && isReversing;
+    const isAebForward = (adas.emergencyBrake || isStopZoneAhead || isObstacleSafetyStoppedAhead) && !isReversing;
+    const isAebRear = (adas.emergencyBrake || isStopZoneBehind || isObstacleSafetyStoppedBehind) && isReversing;
 
     const isBlockedAhead = isEStopped || isAebForward;
     const isBlockedBehind = isEStopped || isAebRear;
 
     let throttle = keyThrottle;
-    if (isBlockedAhead) {
-      if (throttle > 0) throttle = 0;
-      if (speed > 0) speed = Math.max(0, speed - PHYSICS.brake * 4.0 * dt);
-    }
-    if (isBlockedBehind) {
-      if (throttle < 0) throttle = 0;
-      if (speed < 0) speed = Math.min(0, speed + PHYSICS.brake * 4.0 * dt);
+    if (isBlockedAhead && throttle > 0) throttle = 0;
+    if (isBlockedBehind && throttle < 0) throttle = 0;
+
+    // Immediately synchronize the emergency brake status with ZERO delay when stopped by safety system
+    if (isObstacleSafetyStopped && (!adas.emergencyBrake || adas.collisionRisk !== "CRITICAL")) {
+      useAdasStore.getState().setAdasResult({
+        emergencyBrake: true,
+        collisionRisk: "CRITICAL",
+        threatDirection: isReversing ? "REAR" : "FRONT",
+      });
     }
 
     const maxSpeed = boost
@@ -117,18 +154,79 @@ export function Controls() {
       : throttle >= 0
         ? PHYSICS.normalMaxSpeed
         : PHYSICS.reverseMaxSpeed;
-    const target = throttle * maxSpeed;
 
-    if (Math.abs(throttle) > PHYSICS.throttleDeadzone) {
-      if (target > speed) {
-        speed = Math.min(target, speed + PHYSICS.accel * dt);
-      } else {
-        speed = Math.max(target, speed - PHYSICS.brake * dt);
+    // Progressive distance-based target speed calculation
+    let target = throttle * maxSpeed;
+
+    if (throttle > 0 && !isBlockedAhead) {
+      if (forwardClearance <= STOP_CLEARANCE) {
+        target = 0;
+      } else if (forwardClearance < slowClearance) {
+        // Smooth progressive slowdown curve: ratio = (d - 2.5m) / (slowClearance - 2.5m)
+        const normDist = clamp((forwardClearance - STOP_CLEARANCE) / (slowClearance - STOP_CLEARANCE), 0, 1);
+        const speedRatio = Math.pow(normDist, 1.25);
+        const allowedSpeed = maxSpeed * speedRatio;
+        target = Math.min(target, allowedSpeed);
       }
-    } else if (!(isBlockedAhead && speed > 0) && !(isBlockedBehind && speed < 0)) {
-      const dir = Math.sign(speed);
-      speed -= dir * Math.min(Math.abs(speed), PHYSICS.coastDecel * dt);
-      if (Math.sign(speed) !== dir) speed = 0;
+    } else if (throttle < 0 && !isBlockedBehind) {
+      if (rearClearance <= STOP_CLEARANCE) {
+        target = 0;
+      } else if (rearClearance < slowClearance) {
+        const normDist = clamp((rearClearance - STOP_CLEARANCE) / (slowClearance - STOP_CLEARANCE), 0, 1);
+        const speedRatio = Math.pow(normDist, 1.25);
+        const allowedSpeed = maxSpeed * speedRatio;
+        target = Math.max(target, -allowedSpeed);
+      }
+    }
+
+    // Smooth speed tracking with progressive deceleration and anti-oscillation
+    if (isBlockedAhead && speed > 0) {
+      // Hold complete stop or apply emergency braking at critical 2.5m threshold
+      const stopBrake = isStopZoneAhead && speed < 1.5 ? PHYSICS.brake * 2.0 : PHYSICS.brake * 4.0;
+      speed = Math.max(0, speed - stopBrake * dt);
+      if (speed <= 0.05) speed = 0;
+    } else if (isBlockedBehind && speed < 0) {
+      const stopBrake = isStopZoneBehind && speed > -1.5 ? PHYSICS.brake * 2.0 : PHYSICS.brake * 4.0;
+      speed = Math.min(0, speed + stopBrake * dt);
+      if (speed >= -0.05) speed = 0;
+    } else if (Math.abs(throttle) > PHYSICS.throttleDeadzone) {
+      if (throttle > 0) {
+        if (target > speed) {
+          speed = Math.min(target, speed + PHYSICS.accel * dt);
+        } else {
+          // Dynamic smooth braking toward progressively decreasing target speed
+          const decel = Math.max(PHYSICS.brake, (speed - target) * 3.5);
+          speed = Math.max(target, speed - decel * dt);
+        }
+      } else {
+        if (target < speed) {
+          speed = Math.max(target, speed - PHYSICS.accel * dt);
+        } else {
+          const decel = Math.max(PHYSICS.brake, (target - speed) * 3.5);
+          speed = Math.min(target, speed + decel * dt);
+        }
+      }
+    } else {
+      // Coasting deceleration or obstacle approach deceleration while throttle released
+      if (speed > 0) {
+        let coastTarget = 0;
+        if (forwardClearance < slowClearance) {
+          const normDist = clamp((forwardClearance - STOP_CLEARANCE) / (slowClearance - STOP_CLEARANCE), 0, 1);
+          coastTarget = Math.min(speed, maxSpeed * Math.pow(normDist, 1.25));
+        }
+        const decel = speed > coastTarget ? PHYSICS.brake : PHYSICS.coastDecel;
+        speed = Math.max(coastTarget, speed - decel * dt);
+        if (speed <= 0.05 && coastTarget === 0) speed = 0;
+      } else if (speed < 0) {
+        let coastTarget = 0;
+        if (rearClearance < slowClearance) {
+          const normDist = clamp((rearClearance - STOP_CLEARANCE) / (slowClearance - STOP_CLEARANCE), 0, 1);
+          coastTarget = Math.max(speed, -maxSpeed * Math.pow(normDist, 1.25));
+        }
+        const decel = speed < coastTarget ? PHYSICS.brake : PHYSICS.coastDecel;
+        speed = Math.min(coastTarget, speed + decel * dt);
+        if (speed >= -0.05 && coastTarget === 0) speed = 0;
+      }
     }
 
     const speedFactor = clamp(Math.abs(speed) / PHYSICS.normalMaxSpeed, 0, 1);
