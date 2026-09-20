@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useSim } from "@/lib/simStore";
 import { useSensor } from "@/lib/virtualSensor";
 import { useAdasStore } from "@/lib/mlClient";
@@ -12,6 +13,25 @@ const GEAR_LABELS: Record<string, string> = {
   D: "D",
   B: "BST",
 };
+
+// Smooth numeric value interpolation for professional truck simulator instrument clusters
+function useSmoothNumber(target: number, factor = 0.32, decimals = 0) {
+  const [current, setCurrent] = useState(target);
+  useEffect(() => {
+    let animId: number;
+    const update = () => {
+      setCurrent((prev) => {
+        const diff = target - prev;
+        if (Math.abs(diff) < 0.05) return target;
+        return Number((prev + diff * factor).toFixed(decimals + 2));
+      });
+      animId = requestAnimationFrame(update);
+    };
+    animId = requestAnimationFrame(update);
+    return () => cancelAnimationFrame(animId);
+  }, [target, factor, decimals]);
+  return decimals === 0 ? Math.round(current) : Number(current.toFixed(decimals));
+}
 
 export function DashboardPanel() {
   // Sim Store
@@ -34,6 +54,11 @@ export function DashboardPanel() {
   const closestObstacleM = useAdasStore((s) => s.closestObstacleM);
   const ttcSeconds = useAdasStore((s) => s.ttcSeconds);
   const steeringGuidance = useAdasStore((s) => s.steeringGuidance);
+
+  // Smooth telemetry numbers for instrument cluster feel
+  const smoothSpeed = useSmoothNumber(speedKmh, 0.35, 0);
+  const smoothDist = useSmoothNumber(closestObstacleM, 0.35, 1);
+  const smoothTtc = useSmoothNumber(ttcSeconds, 0.35, 1);
 
   const isCritical = connected && (risk === "CRITICAL" || emergencyBrake);
   const isCaution = connected && risk === "CAUTION" && !isCritical;
@@ -93,7 +118,7 @@ export function DashboardPanel() {
         <div className="flex items-baseline justify-between pt-1">
           <div className="flex items-baseline gap-2">
             <span className="font-mono text-5xl font-black tracking-tight text-white drop-shadow-[0_2px_12px_rgba(255,255,255,0.15)]">
-              {speedKmh}
+              {smoothSpeed}
             </span>
             <span className="font-mono text-xs font-bold tracking-wider text-zinc-400 uppercase">
               KM/H
@@ -257,7 +282,7 @@ export function DashboardPanel() {
             </div>
             <div className="flex items-baseline gap-1.5 pt-0.5">
               <span className={`font-mono text-4xl font-black ${distColor}`}>
-                {isClear ? "> 80" : closestObstacleM.toFixed(1)}
+                {isClear ? "> 80" : smoothDist.toFixed(1)}
               </span>
               <span className="font-mono text-xs font-bold text-zinc-400 uppercase">
                 Meters
@@ -282,7 +307,7 @@ export function DashboardPanel() {
             >
               {!connected || speedKmh < 1 || ttcSeconds > 25
                 ? "--"
-                : `${ttcSeconds.toFixed(1)}s`}
+                : `${smoothTtc.toFixed(1)}s`}
             </span>
           </div>
         </div>

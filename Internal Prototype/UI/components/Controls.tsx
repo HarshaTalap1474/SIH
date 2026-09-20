@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
-import { BLOCKERS, DUMPER, PHYSICS, clamp, damp } from "@/lib/constants";
+import { BLOCKERS, DUMPER, PHYSICS, clamp, damp, getRoadElevation, getRoadOrientation } from "@/lib/constants";
 import { isKeyDown } from "@/lib/keys";
 import { useSensor } from "@/lib/virtualSensor";
 import { useSim, GearMode } from "@/lib/simStore";
@@ -13,13 +13,16 @@ import { hwClient, useHardwareStore } from "@/lib/hardwareClient";
 export function Controls() {
   const prevSpeed = useRef(0);
   const pitchVis = useRef(0);
+  const pitchVel = useRef(0);
   const rollVis = useRef(0);
+  const rollVel = useRef(0);
   const steerVis = useRef(0);
   const spinAngle = useRef(0);
   const joltVis = useRef(0);
   const estopLatched = useRef(false); // physical E-Stop — clears on button release, disconnect, or X key
   const prevEstop = useRef(false);
   const prevXKey = useRef(false);
+  const smoothSlope = useRef(0);
 
   useEffect(() => {
     adasClient.init();
@@ -149,14 +152,38 @@ export function Controls() {
       });
     }
 
+    // Realistic slope detection along the vehicle's direction of travel
+    const fwdX = -Math.sin(yaw);
+    const fwdZ = -Math.cos(yaw);
+    const travelDir = isReversing ? -1 : 1;
+    const travelX = travelDir * fwdX;
+    const travelZ = travelDir * fwdZ;
+    const sampleDist = 2.0;
+    const roadYCurrent = getRoadElevation(x, z);
+    const roadYAhead = getRoadElevation(x + travelX * sampleDist, z + travelZ * sampleDist);
+    const rawSlope = (roadYAhead - roadYCurrent) / sampleDist; // positive = climbing uphill
+
+    // Uphill resistance applies strictly when travelling uphill (slope > 0)
+    // Downhill travel (rawSlope <= 0) experiences zero uphill resistance
+    const uphillSlope = rawSlope > 0.012 ? rawSlope : 0;
+    smoothSlope.current = damp(smoothSlope.current, uphillSlope, 3.2, dt);
+
+    // Proportional uphill resistance factor:
+    // Gentle slope (~0.04): factor ~0.90 -> 39 km/h drops to ~35 km/h
+    // Moderate slope (~0.08): factor ~0.80 -> 39 km/h drops to ~31 km/h
+    // Steeper slope (~0.12): factor ~0.68 -> 39 km/h drops to ~26 km/h
+    const slopeMultiplier = boost ? 2.0 : 2.6;
+    const minFactor = boost ? 0.65 : 0.58;
+    const uphillFactor = clamp(1.0 - smoothSlope.current * slopeMultiplier, minFactor, 1.0);
+
     const maxSpeed = boost
       ? PHYSICS.boostMaxSpeed
       : throttle >= 0
         ? PHYSICS.normalMaxSpeed
         : PHYSICS.reverseMaxSpeed;
 
-    // Progressive distance-based target speed calculation
-    let target = throttle * maxSpeed;
+    // Progressive distance-based target speed calculation scaled by uphill slope resistance
+    let target = throttle * maxSpeed * (throttle !== 0 ? uphillFactor : 1.0);
 
     if (throttle > 0 && !isBlockedAhead) {
       if (forwardClearance <= STOP_CLEARANCE) {
@@ -192,17 +219,33 @@ export function Controls() {
     } else if (Math.abs(throttle) > PHYSICS.throttleDeadzone) {
       if (throttle > 0) {
         if (target > speed) {
-          speed = Math.min(target, speed + PHYSICS.accel * dt);
+          // Accelerating: gravity drag slightly reduces acceleration on hills
+          const gravityDrag = smoothSlope.current * 9.81 * 0.25;
+          const effectiveAccel = Math.max(0.65, PHYSICS.accel - gravityDrag);
+          speed = Math.min(target, speed + effectiveAccel * dt);
         } else {
-          // Dynamic smooth braking toward progressively decreasing target speed
-          const decel = Math.max(PHYSICS.brake, (speed - target) * 3.5);
+          // Dynamic smooth braking toward target speed:
+          // If ADAS obstacle slowdown is active, use full brake; on uphill slope, use natural heavy-mass decel
+          const isAdasSlowdown = forwardClearance < slowClearance;
+          const hillDecel = Math.max(
+            PHYSICS.coastDecel * 0.8,
+            (speed - target) * 2.2 + smoothSlope.current * 9.81 * 0.35
+          );
+          const decel = isAdasSlowdown ? Math.max(PHYSICS.brake, (speed - target) * 3.5) : hillDecel;
           speed = Math.max(target, speed - decel * dt);
         }
       } else {
         if (target < speed) {
-          speed = Math.max(target, speed - PHYSICS.accel * dt);
+          const gravityDrag = smoothSlope.current * 9.81 * 0.25;
+          const effectiveAccel = Math.max(0.65, PHYSICS.accel - gravityDrag);
+          speed = Math.max(target, speed - effectiveAccel * dt);
         } else {
-          const decel = Math.max(PHYSICS.brake, (target - speed) * 3.5);
+          const isAdasSlowdown = rearClearance < slowClearance;
+          const hillDecel = Math.max(
+            PHYSICS.coastDecel * 0.8,
+            (target - speed) * 2.2 + smoothSlope.current * 9.81 * 0.35
+          );
+          const decel = isAdasSlowdown ? Math.max(PHYSICS.brake, (target - speed) * 3.5) : hillDecel;
           speed = Math.min(target, speed + decel * dt);
         }
       }
@@ -263,6 +306,7 @@ export function Controls() {
       }
     }
 
+
     // Stable transmission gear determination
     const gear: GearMode = boost
       ? "B"
@@ -277,34 +321,46 @@ export function Controls() {
     // Call setFrame to update speedKmh, gear, and state synchronously
     useSim.getState().setFrame({ x, z, yaw, speed, steer, boost, gear });
 
+    const roadY = getRoadElevation(x, z);
+    const { pitch: roadPitch, roll: roadRoll } = getRoadOrientation(x, z);
+
     if (rigParts.rig) {
-      rigParts.rig.position.set(x, 0, z);
+      rigParts.rig.position.set(x, roadY, z);
       rigParts.rig.rotation.y = yaw;
     }
 
     const accel = dt > 0 ? (speed - prevSpeed.current) / dt : 0;
     prevSpeed.current = speed;
-    const pitchTarget = clamp(accel * PHYSICS.pitchFromAccel, -PHYSICS.pitchClamp, PHYSICS.pitchClamp);
-    const rollTarget = -steer * speedFactor * PHYSICS.rollFromSteer;
-    pitchVis.current = damp(pitchVis.current, pitchTarget, 6, dt);
-    rollVis.current = damp(rollVis.current, rollTarget, 6, dt);
+
+    // Heavy hydro-pneumatic strut suspension spring-damper dynamics
+    // Front suspension visibly dips under braking; rear squats under heavy acceleration
+    const pitchTarget = clamp(accel * 0.024, -0.065, 0.065);
+    const pitchSpring = (pitchTarget - pitchVis.current) * 45.0 - pitchVel.current * 9.5;
+    pitchVel.current += pitchSpring * dt;
+    pitchVis.current += pitchVel.current * dt;
+
+    // Centrifugal body roll with high-center-of-gravity damping
+    const rollTarget = -steer * speedFactor * 0.075;
+    const rollSpring = (rollTarget - rollVis.current) * 38.0 - rollVel.current * 8.5;
+    rollVel.current += rollSpring * dt;
+    rollVis.current += rollVel.current * dt;
 
     const steerTarget = steer * PHYSICS.maxSteerAngle;
-    steerVis.current = damp(steerVis.current, steerTarget, 8, dt);
+    steerVis.current = damp(steerVis.current, steerTarget, 10, dt);
 
     const impact = useSensor.getState().impact;
     joltVis.current = damp(joltVis.current, impact, 14, dt);
 
     if (rigParts.body) {
-      rigParts.body.rotation.x = pitchVis.current;
-      rigParts.body.rotation.z = rollVis.current;
+      rigParts.body.rotation.x = pitchVis.current + roadPitch;
+      rigParts.body.rotation.z = rollVis.current + roadRoll;
       const clock = state.clock.getElapsedTime();
       const jolt =
         joltVis.current * 0.28 * Math.sin(clock * 16) + joltVis.current * 0.18;
-      rigParts.body.position.y =
-        DUMPER.chassis.y +
-        jolt +
-        Math.sin(spinAngle.current * 2) * PHYSICS.bobAmount * speedFactor;
+      // Authentic diesel engine rumble when idling or accelerating
+      const engineIdle = Math.sin(clock * 30) * 0.003 * (0.4 + 0.6 * (1 - speedFactor));
+      const wheelBob = Math.sin(spinAngle.current * 2) * PHYSICS.bobAmount * speedFactor;
+      rigParts.body.position.y = DUMPER.chassis.y + jolt + engineIdle + wheelBob;
     }
 
     if (rigParts.frontLeft) rigParts.frontLeft.rotation.y = steerVis.current;

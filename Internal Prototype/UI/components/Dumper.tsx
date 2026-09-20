@@ -6,6 +6,7 @@ import { useFrame } from "@react-three/fiber";
 import { DUMPER } from "@/lib/constants";
 import { rigParts } from "@/lib/rig";
 import { useSim } from "@/lib/simStore";
+import { useAdasStore } from "@/lib/mlClient";
 
 // Ultra-premium industrial mining color palette (CAT / Komatsu heavy aesthetic)
 const C = {
@@ -208,7 +209,7 @@ function RearDualWheel({ x, z }: DualWheelProps) {
         {/* Inner Wheel Assembly */}
         <group position={[x > 0 ? -spacing / 2 : spacing / 2, 0, 0]}>
           <mesh castShadow receiveShadow rotation={[0, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[r, r, w, 28]} />
+            <cylinderGeometry args={[r, r, w, 28]} />S
             <meshStandardMaterial color={C.tire} roughness={0.94} />
           </mesh>
           {TREAD_BLOCKS.map((ang, i) => (
@@ -267,7 +268,8 @@ export function Dumper() {
     }
   });
 
-  const isBraking = gear === "R" || gear === "N";
+  const adasBrake = useAdasStore((s) => s.emergencyBrake);
+  const isBraking = gear === "R" || gear === "N" || gear === "P" || adasBrake;
   const inCockpit = camMode === "cockpit";
 
   return (
@@ -462,11 +464,11 @@ export function Dumper() {
           {headlights && (
             <spotLight
               position={[0, 0, -0.2]}
-              target-position={[-1.5, -1.2, -40]}
-              intensity={40}
-              distance={90}
+              target-position={[-1.5, -1.2, -45]}
+              intensity={55}
+              distance={110}
               angle={0.68}
-              penumbra={0.45}
+              penumbra={0.5}
               color="#fef08a"
               castShadow
             />
@@ -494,18 +496,18 @@ export function Dumper() {
               emissiveIntensity={headlights ? 3.5 : 0}
             />
           </mesh>
-          <mesh position={[-0.26, 0, -0.06]}>
+          <mesh position={[0.26, 0, -0.06]}>
             <boxGeometry args={[0.06, 0.22, 0.04]} />
             <meshStandardMaterial color={C.lightAmber} emissive={C.lightAmber} emissiveIntensity={1.2} />
           </mesh>
           {headlights && (
             <spotLight
               position={[0, 0, -0.2]}
-              target-position={[1.5, -1.2, -40]}
-              intensity={40}
-              distance={90}
+              target-position={[1.5, -1.2, -45]}
+              intensity={55}
+              distance={110}
               angle={0.68}
-              penumbra={0.45}
+              penumbra={0.5}
               color="#fef08a"
               castShadow
             />
@@ -643,6 +645,44 @@ export function Dumper() {
           <mesh position={[0.32, 0.15, 0]}>
             <cylinderGeometry args={[0.22, 0.22, 0.05, 12]} />
             <meshStandardMaterial color="#18181b" roughness={0.8} />
+          </mesh>
+        </group>
+
+        {/* Mining Safety Amber Flashing / Rotating Hazard Beacons */}
+        <group position={[-1.35, 3.42, -3.15]}>
+          <mesh castShadow>
+            <cylinderGeometry args={[0.13, 0.15, 0.12, 12]} />
+            <meshStandardMaterial color="#18181b" roughness={0.7} />
+          </mesh>
+          <mesh ref={beaconMesh} position={[0, 0.12, 0]}>
+            <cylinderGeometry args={[0.11, 0.11, 0.16, 12]} />
+            <meshStandardMaterial
+              color={C.beacon}
+              emissive={C.beacon}
+              emissiveIntensity={1.8}
+              roughness={0.2}
+              transparent
+              opacity={0.92}
+            />
+          </mesh>
+          <pointLight ref={beaconLight} position={[0, 0.25, 0]} color={C.beacon} intensity={4} distance={14} />
+        </group>
+
+        <group position={[0.25, 3.42, -3.15]}>
+          <mesh castShadow>
+            <cylinderGeometry args={[0.13, 0.15, 0.12, 12]} />
+            <meshStandardMaterial color="#18181b" roughness={0.7} />
+          </mesh>
+          <mesh position={[0, 0.12, 0]}>
+            <cylinderGeometry args={[0.11, 0.11, 0.16, 12]} />
+            <meshStandardMaterial
+              color={C.beacon}
+              emissive={C.beacon}
+              emissiveIntensity={1.8}
+              roughness={0.2}
+              transparent
+              opacity={0.92}
+            />
           </mesh>
         </group>
 
@@ -1000,6 +1040,22 @@ export function Dumper() {
             />
           </mesh>
         </group>
+
+        {/* Taillight and Reverse Ground Bounce Illumination */}
+        {isBraking && (
+          <pointLight position={[0, 0.4, 4.8]} intensity={3.5} distance={10} color="#ef4444" />
+        )}
+        {gear === "R" && (
+          <spotLight
+            position={[0, 0.9, 4.6]}
+            target-position={[0, 0, 20]}
+            intensity={24}
+            distance={26}
+            angle={0.7}
+            penumbra={0.6}
+            color="#f8fafc"
+          />
+        )}
 
         {/* Heavy Reinforced Rubber Mudflaps with Diagonal Hazard Chevron Striping */}
         <group position={[0, 0.85, 3.8]}>

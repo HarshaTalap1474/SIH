@@ -1,7 +1,10 @@
 "use client";
 
 import { create } from "zustand";
-import { BLOCKERS, PHYSICS, STOCKPILES } from "./constants";
+import {
+  BLOCKERS,
+  PHYSICS,
+} from "./constants";
 
 export type CollisionRisk = "SAFE" | "CAUTION" | "CRITICAL";
 
@@ -57,26 +60,22 @@ export const useAdasStore = create<AdasState>()((set) => ({
   setAdasResult: (res) => set((state) => ({ ...state, ...res })),
 }));
 
-// Semantic non-collidable scene obstacles (detected by ADAS perception sensors, no physics colliders)
+// Semantic scene obstacle metadata
 export interface SemanticObstacleMetadata {
-  readonly type: "sign_board" | "crane" | "machinery";
+  readonly type: "sign_board" | "crane" | "machinery" | "pole" | "rock";
   readonly name: string;
   readonly category: "big" | "small";
-  readonly targetClearance: number; // 10m for big, 5m for small
+  readonly targetClearance: number; // 2.5m standard stop clearance
   readonly x: number;
   readonly z: number;
   readonly radius: number;
 }
 
 export const SEMANTIC_OBSTACLES: ReadonlyArray<SemanticObstacleMetadata> = [
-  // Roadside Sign Boards — Small Objects (2.5m target clearance)
-  { type: "sign_board", name: "SPEED 20 Sign", category: "small", targetClearance: 2.5, x: -11, z: -40, radius: 1.4 },
-  { type: "sign_board", name: "CAUTION FOG Sign", category: "small", targetClearance: 2.5, x: 11, z: -100, radius: 1.4 },
-  { type: "sign_board", name: "HAUL ROAD Sign", category: "small", targetClearance: 2.5, x: -11, z: -160, radius: 1.4 },
-  // Construction Crane / Heavy Excavator — Big Objects (2.5m target clearance)
+  // Construction Crane / Heavy Excavator — Big Objects
   { type: "crane", name: "Construction Crane / Excavator", category: "big", targetClearance: 2.5, x: -70, z: -30, radius: 4.8 },
-  // Construction Loader — Big Objects (2.5m target clearance)
-  { type: "machinery", name: "Construction Loader", category: "big", targetClearance: 2.5, x: 47, z: -62, radius: 3.2 },
+  // Construction Loader — Big Objects
+  { type: "machinery", name: "Construction Loader", category: "big", targetClearance: 2.5, x: 47, z: -62, radius: 3.5 },
 ];
 
 export interface RayHit {
@@ -85,7 +84,9 @@ export interface RayHit {
   category: "big" | "small";
 }
 
-// Map-Aware Raycast distance calculation against obstacles and pit boundaries
+
+
+// Map-Aware Raycast distance calculation against obstacles, barriers, and pit boundaries
 function castRay(
   originX: number,
   originZ: number,
@@ -99,15 +100,12 @@ function castRay(
   let minClearance = 2.5;
   let minCategory: "big" | "small" = "big";
 
-  // 1. Check genuine obstacle bodies (stockpiles, boulders, machinery)
-  // In BLOCKERS: first (STOCKPILES.length + 2) entries are large stockpiles/platform/pond.
-  // Entries after that are small rocks/boulders from ROCK_SPOTS.
-  const numBigBlockers = STOCKPILES.length + 2;
+  // 1. Check genuine obstacle bodies (stockpiles, boulders, machinery, poles, signs, rock clusters)
   for (let i = 0; i < BLOCKERS.length; i++) {
     const [bx, bz, br] = BLOCKERS[i];
-    const isSmallRock = i >= numBigBlockers;
     const clearance = 2.5;
-    const category: "big" | "small" = isSmallRock ? "small" : "big";
+    const isSmall = br < 2.0;
+    const category: "big" | "small" = isSmall ? "small" : "big";
 
     const ox = bx - originX;
     const oz = bz - originZ;
@@ -116,7 +114,8 @@ function castRay(
     if (proj <= 0) continue; // Behind ray
 
     const perpSq = ox * ox + oz * oz - proj * proj;
-    const effRadius = br + 1.2;
+    // Bumper clearance: tight collision envelope for accurate 2.5m obstacle stopping
+    const effRadius = br + (br >= 3.0 ? 0.8 : 0.3);
 
     if (perpSq < effRadius * effRadius) {
       const hitDist = proj - Math.sqrt(Math.max(0, effRadius * effRadius - perpSq));
@@ -128,28 +127,7 @@ function castRay(
     }
   }
 
-  // 2. Check semantic non-collidable scene objects
-  for (const obj of SEMANTIC_OBSTACLES) {
-    const ox = obj.x - originX;
-    const oz = obj.z - originZ;
-
-    const proj = ox * dx + oz * dz;
-    if (proj <= 0) continue; // Behind ray
-
-    const perpSq = ox * ox + oz * oz - proj * proj;
-    const effRadius = obj.radius + 1.2;
-
-    if (perpSq < effRadius * effRadius) {
-      const hitDist = proj - Math.sqrt(Math.max(0, effRadius * effRadius - perpSq));
-      if (hitDist > 0 && hitDist < minDist) {
-        minDist = hitDist;
-        minClearance = obj.targetClearance;
-        minCategory = obj.category;
-      }
-    }
-  }
-
-  // 3. Pit outer mountain rim check
+  // 2. Pit outer mountain rim check
   const b = originX * dx + originZ * dz;
   const c = originX * originX + originZ * originZ - PHYSICS.arenaRadius * PHYSICS.arenaRadius;
   const disc = b * b - c;
@@ -161,6 +139,8 @@ function castRay(
       minCategory = "big";
     }
   }
+
+
 
   return {
     dist: Math.round(minDist * 10) / 10,
@@ -274,13 +254,15 @@ class ADASWebSocketClient {
     const fx = -Math.sin(yaw);
     const fz = -Math.cos(yaw);
 
-    // Front sensor mount location (front bumper of the truck, 3.1m in front of center)
-    const sensorX = x + fx * 3.1;
-    const sensorZ = z + fz * 3.1;
+    // Front sensor mount location (front bumper of the truck, 4.65m in front of center)
+    const FRONT_SENSOR_OFFSET = 4.65;
+    const sensorX = x + fx * FRONT_SENSOR_OFFSET;
+    const sensorZ = z + fz * FRONT_SENSOR_OFFSET;
 
-    // Rear sensor mount location (rear bumper, 3.1m behind center)
-    const rearX = x - fx * 3.1;
-    const rearZ = z - fz * 3.1;
+    // Rear sensor mount location (rear bumper, 4.5m behind center)
+    const REAR_SENSOR_OFFSET = 4.5;
+    const rearX = x - fx * REAR_SENSOR_OFFSET;
+    const rearZ = z - fz * REAR_SENSOR_OFFSET;
 
     // Compute 5 frontal distance sensor rays + 5 rear distance sensor rays
     const rFarLeft = castRay(sensorX, sensorZ, yaw + 45 * DEG);

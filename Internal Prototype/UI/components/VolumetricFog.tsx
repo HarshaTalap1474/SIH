@@ -56,9 +56,10 @@ export function VolumetricFog() {
     return texture;
   }, []);
 
-  useFrame((_, delta) => {
+  useFrame((state, delta) => {
     if (!groupRef.current) return;
     const dt = Math.min(delta, 0.05);
+    const t = state.clock.getElapsedTime();
     const { fogMode, rainMode } = useSim.getState();
 
     const baseOpacity =
@@ -84,6 +85,7 @@ export function VolumetricFog() {
       const sheet = MIST_SHEETS[i];
       if (sheet && child) {
         child.rotation.z += sheet.rotSpeed * dt;
+        child.position.y = sheet.y + Math.sin(t * 0.35 + i * 1.4) * 0.35;
         const mat = child.material as THREE.MeshBasicMaterial;
         if (mat) {
           mat.opacity = currentOpacityRef.current;
@@ -107,7 +109,7 @@ export function VolumetricFog() {
           <planeGeometry args={[1, 1]} />
           <meshBasicMaterial
             map={mistTexture}
-            color="#2a2522"
+            color="#38322e"
             transparent
             opacity={0.15}
             depthWrite={false}

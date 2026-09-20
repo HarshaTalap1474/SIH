@@ -16,8 +16,8 @@ import { silenceThreeClockWarning } from "@/lib/threeWarnings";
 silenceThreeClockWarning();
 
 const targetColorObj = new THREE.Color();
-const FOG_DENSITIES = { heavy: 0.0285, medium: 0.0165, clear: 0.0055 } as const;
-const RAIN_HAZES = { high: 0.008, medium: 0.0035, none: 0.0 } as const;
+const FOG_DENSITIES = { heavy: 0.0135, medium: 0.0075, clear: 0.0028 } as const;
+const RAIN_HAZES = { high: 0.005, medium: 0.0025, none: 0.0 } as const;
 
 function FogEnvironment() {
   const fogRef = useRef<THREE.FogExp2>(null);
@@ -52,7 +52,7 @@ function FogEnvironment() {
   return (
     <>
       <color ref={bgRef} attach="background" args={[SCENE.background]} />
-      <fogExp2 ref={fogRef} attach="fog" args={[SCENE.background, 0.022]} />
+      <fogExp2 ref={fogRef} attach="fog" args={[SCENE.background, 0.0135]} />
     </>
   );
 }
@@ -60,33 +60,39 @@ function FogEnvironment() {
 export function Scene() {
   return (
     <Canvas
-      shadows="percentage"
+      shadows={{ type: THREE.PCFShadowMap }}
       dpr={[1, 1.5]}
       camera={{ fov: 55, near: 0.5, far: 500, position: [0, 6, 8] }}
       gl={{
         antialias: true,
         powerPreference: "high-performance",
+        toneMapping: THREE.ACESFilmicToneMapping,
+        toneMappingExposure: 1.18,
       }}
     >
       <FogEnvironment />
 
-      {/* Atmospheric Iron-Ore Quarry Lighting */}
-      <hemisphereLight args={["#fde68a", "#38231a", 0.8]} />
+      {/* Atmospheric Iron-Ore Quarry Cinematic Night Lighting */}
+      <hemisphereLight args={["#fef3c7", "#24130c", 0.85]} />
+      {/* Key Directional Quarry Light */}
       <directionalLight
-        position={[60, 80, 40]}
-        intensity={1.9}
+        position={[50, 85, 35]}
+        intensity={1.8}
+        color="#fffbeb"
         castShadow
-        shadow-bias={-0.0003}
+        shadow-bias={-0.00025}
         shadow-mapSize-width={2048}
         shadow-mapSize-height={2048}
-        shadow-camera-left={-110}
-        shadow-camera-right={110}
-        shadow-camera-top={110}
-        shadow-camera-bottom={-110}
+        shadow-camera-left={-140}
+        shadow-camera-right={140}
+        shadow-camera-top={140}
+        shadow-camera-bottom={-140}
         shadow-camera-near={1}
-        shadow-camera-far={260}
+        shadow-camera-far={320}
       />
-      <ambientLight intensity={0.35} />
+      {/* Cool Secondary Fill / Rim Light for Edge Separation */}
+      <directionalLight position={[-60, 55, -40]} intensity={0.6} color="#94a3b8" />
+      <ambientLight intensity={0.42} color="#38251b" />
 
       <Terrain />
       <VolumetricFog />

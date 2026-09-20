@@ -29,7 +29,7 @@ export const PHYSICS = {
   pitchClamp: 0.05,
   rollFromSteer: 0.07,
   bobAmount: 0.04,
-  arenaRadius: 120,
+  arenaRadius: 215,
   truckRadius: 3.0,
 } as const;
 
@@ -79,16 +79,36 @@ export const SCENE = {
 } as const;
 
 export const PIT_BENCHES = [
-  { r: 125, h: 6, color: "#3d2216", topColor: "#4e2b1c" },
-  { r: 140, h: 12, color: "#361e13", topColor: "#452618" },
-  { r: 156, h: 18, color: "#2f1a10", topColor: "#3d2216" },
-  { r: 172, h: 24, color: "#29170e", topColor: "#361e13" },
+  { r: 125, h: 6, color: "#362118", topColor: "#2c1a13" },
+  { r: 140, h: 12, color: "#2d1b13", topColor: "#251610" },
+  { r: 156, h: 18, color: "#241610", topColor: "#1e110c" },
+  { r: 172, h: 24, color: "#1c120a", topColor: "#170e08" },
+] as const;
+
+// Natural mountain ridges and hills enclosing the quarry perimeter into atmospheric haze
+export const OUTER_RIDGES = [
+  { x: 0, z: -235, r: 48, h: 32 },
+  { x: -55, z: -215, r: 46, h: 28 },
+  { x: 55, z: -215, r: 46, h: 28 },
+  { x: -110, z: -170, r: 44, h: 25 },
+  { x: 110, z: -170, r: 44, h: 25 },
+  { x: 165, z: -95, r: 44, h: 24 },
+  { x: 180, z: -5, r: 46, h: 25 },
+  { x: 165, z: 85, r: 44, h: 24 },
+  { x: 110, z: 170, r: 44, h: 25 },
+  { x: 55, z: 215, r: 46, h: 28 },
+  { x: 0, z: 235, r: 48, h: 32 },
+  { x: -55, z: 215, r: 46, h: 28 },
+  { x: -110, z: 170, r: 44, h: 25 },
+  { x: -165, z: 85, r: 44, h: 24 },
+  { x: -180, z: -5, r: 46, h: 25 },
+  { x: -165, z: -95, r: 44, h: 24 },
 ] as const;
 
 export const ROCK_SPOTS: ReadonlyArray<readonly [number, number, number]> = [
-  [-24, -98, 1.8],
-  [24, -96, 2.0],
-  [-17, -64, 1.4],
+  [-28, -98, 1.8],
+  [28, -96, 2.0],
+  [-29, -64, 1.4],
   [58, -92, 2.3],
   [45, 10, 1.7],
   [-40, 42, 2.4],
@@ -117,10 +137,81 @@ export const PATCHES: ReadonlyArray<readonly [number, number, number, number]> =
   [-40, -40, 30, 26],
 ];
 
+// Roadside Safety Warning & Speed Sign Boards along haul road
+export const ROAD_SIGNS = [
+  { x: -11, z: -15, text: "BLAST ZONE 500M", rot: 0.12, radius: 1.4 },
+  { x: 11, z: -65, text: "SPEED 20", rot: -0.18, radius: 1.4 },
+  { x: -11, z: -115, text: "CAUTION FOG", rot: 0.15, radius: 1.4 },
+  { x: 11, z: 45, text: "BLIND CORNER", rot: -0.15, radius: 1.4 },
+  { x: -11, z: 110, text: "HAUL PRIORITY", rot: 0.2, radius: 1.4 },
+  { x: 11, z: 170, text: "PIT END", rot: -0.15, radius: 1.4 },
+] as const;
+
+// High-Mast Floodlight Towers (12m steel lattice with concrete foundation base)
+export const LIGHT_TOWERS = [
+  { x: 17, z: -50, rot: -0.3, radius: 1.8 },
+  { x: -18, z: -120, rot: 0.4, radius: 1.8 },
+  { x: 17, z: 65, rot: -0.35, radius: 1.8 },
+  { x: -18, z: 135, rot: 0.3, radius: 1.8 },
+] as const;
+
+// Industrial Power Utility Poles with ceramic insulators
+export const UTILITY_POLES = [
+  { x: 110, z: -90, rot: -0.4, radius: 0.8 },
+  { x: -110, z: -80, rot: 0.3, radius: 0.8 },
+  { x: 120, z: 40, rot: -0.6, radius: 0.8 },
+  { x: -115, z: 60, rot: 0.5, radius: 0.8 },
+  { x: 25, z: 145, rot: 0.1, radius: 0.8 },
+] as const;
+
+// Scattered Roadside Gravel Clusters & Micro-Boulders
+export const GRAVEL_CLUSTERS: ReadonlyArray<readonly [number, number, number]> = [
+  [-11.5, -20, 1.2],
+  [11.5, -55, 1.4],
+  [-11.2, -75, 1.1],
+  [11.4, -110, 1.5],
+  [-11.6, -145, 1.3],
+  [11.5, 20, 1.2],
+  [-11.3, 75, 1.4],
+  [11.6, 125, 1.3],
+];
+
+// Heavy Mining Equipment & Cranes
+export const HEAVY_EQUIPMENT = [
+  { x: 47, z: -62, rot: -Math.PI / 2 + 0.5, radius: 3.5, category: "big" as const, name: "Construction Loader" },
+  { x: -70, z: -30, rot: 0.8, radius: 4.8, category: "big" as const, name: "Construction Crane / Excavator" },
+] as const;
+
+// Continuous Earthen Safety Barriers along Haul Road
+export interface BarrierBox {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+}
+
+export const ROAD_BARRIERS: ReadonlyArray<BarrierBox> = [
+  // Left haul road safety berm (with opening at z=[-38, -22] for quarry excavator access)
+  { minX: -10.4, maxX: -9.2, minZ: -190, maxZ: -38 },
+  { minX: -10.4, maxX: -9.2, minZ: -22, maxZ: 190 },
+  // Right haul road safety berm (with opening at z=[-72, -52] for crusher loading ramp access)
+  { minX: 9.2, maxX: 10.4, minZ: -190, maxZ: -72 },
+  { minX: 9.2, maxX: 10.4, minZ: -52, maxZ: 190 },
+];
+
 export const BLOCKERS: ReadonlyArray<readonly [number, number, number]> = [
+  // 1. Stockpiles & Pit Structures
   ...STOCKPILES.map(([x, z, r]) => [x, z, r + 1] as const),
+  [55, -67, 6.5],
+  [48, -56, 5.5],
   [52, -62, 12.5],
   [-55, 35, 11.5],
+  [36, -62, 4.5],
+
+  // 2. Heavy mining machinery & crane (Excavator, Crane, Loader)
+  ...HEAVY_EQUIPMENT.map((e) => [e.x, e.z, e.radius] as const),
+
+  // 3. Designated rock obstacles
   ...ROCK_SPOTS.map(([x, z, s]) => [x, z, s * 1.5] as const),
 ];
 
@@ -147,3 +238,16 @@ export const DUMPER = {
     bin: "#d97706",
   },
 } as const;
+
+export {
+  getHaulRoadCenterlineY,
+  getRoadElevation,
+  getRoadOrientation,
+  getTerrainElevation,
+  getRoadCenterline,
+  getRoadCenterX,
+  getRoadCenterY,
+  getRoadEdgePoint,
+  getRoadLateralOffset,
+  getRoadWidth,
+} from "./terrainElevation";

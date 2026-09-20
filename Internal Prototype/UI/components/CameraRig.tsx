@@ -3,7 +3,7 @@
 import { useRef } from "react";
 import * as THREE from "three";
 import { useFrame } from "@react-three/fiber";
-import { CAMERA, SCENE, SENSOR, angleDeltaDeg, clamp } from "@/lib/constants";
+import { CAMERA, SCENE, SENSOR, angleDeltaDeg, clamp, damp, getRoadElevation } from "@/lib/constants";
 import { useSim } from "@/lib/simStore";
 import { useSensor } from "@/lib/virtualSensor";
 
@@ -15,11 +15,40 @@ export function CameraRig() {
   );
   const lookTarget = useRef(new THREE.Vector3(0, CAMERA.lookHeight, 0));
   const currentFov = useRef(55);
+  const smoothYaw = useRef(0);
+  const prevSpeed = useRef(0);
+  const speedInertia = useRef(0);
+  const steerLook = useRef(0);
+  const initialized = useRef(false);
 
   useFrame(({ camera }, rawDt) => {
     const dt = Math.min(rawDt, 0.05);
-    const k = 1 - Math.exp(-CAMERA.dampLambda * dt);
     const sim = useSim.getState();
+
+    // Initialize smoothYaw to initial vehicle yaw on mount
+    if (!initialized.current) {
+      smoothYaw.current = sim.yaw;
+      initialized.current = true;
+    }
+
+    // Dynamic inertia calculation from vehicle acceleration
+    const accel = dt > 0 ? (sim.speed - prevSpeed.current) / dt : 0;
+    prevSpeed.current = sim.speed;
+    const speedFrac = clamp(Math.abs(sim.speed) / 11, 0, 1);
+
+    // Dynamic camera distance inertia (lags back on accel, presses forward on brake)
+    const targetInertia = clamp(accel * 0.18, -1.8, 2.2);
+    speedInertia.current = damp(speedInertia.current, targetInertia, 4.5, dt);
+
+    // Dynamic steer apex look-ahead
+    const targetSteerLook = sim.steer * 2.8 * (0.3 + 0.7 * speedFrac);
+    steerLook.current = damp(steerLook.current, targetSteerLook, 5.0, dt);
+
+    // Smooth rotational follow for chase camera (Euro Truck Simulator 2 style orbit lag)
+    let yawDiff = (sim.yaw - smoothYaw.current) % (Math.PI * 2);
+    if (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
+    if (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
+    smoothYaw.current += yawDiff * (1 - Math.exp(-4.2 * dt));
 
     let tx: number;
     let ty: number;
@@ -34,12 +63,15 @@ export function CameraRig() {
     const rightX = Math.cos(sim.yaw);
     const rightZ = -Math.sin(sim.yaw);
 
+    const clock = performance.now() / 1000;
+    const truckY = getRoadElevation(sim.x, sim.z);
+
     if (sim.camMode === "top") {
       tx = sim.x - fwdX * CAMERA.topOffsetZ;
-      ty = CAMERA.topHeight;
+      ty = truckY + CAMERA.topHeight;
       tz = sim.z - fwdZ * CAMERA.topOffsetZ;
       lx = sim.x + fwdX * 4;
-      ly = 0;
+      ly = truckY;
       lz = sim.z + fwdZ * 4;
       targetFov = 50;
     } else if (sim.camMode === "cockpit") {
@@ -49,28 +81,31 @@ export function CameraRig() {
       const cabZ = 4.12; // forward position right at the windshield plane
 
       tx = sim.x + rightX * cabX + fwdX * cabZ;
-      ty = 3.65;
+      ty = truckY + 3.65;
       tz = sim.z + rightZ * cabX + fwdZ * cabZ;
 
+      // Realistic cabin cockpit pitch and roll reaction to braking and acceleration
+      const cabPitch = clamp(-accel * 0.012, -0.04, 0.04);
+      ty += cabPitch;
+
       // Look forward along haul road with dynamic look-ahead into turns
-      const lookDist = 35;
-      const steerLookAhead = sim.steer * 4.5;
-      const baseLx = tx + fwdX * lookDist + rightX * steerLookAhead;
-      const baseLy = 2.2; // slight downward gaze towards road surface
-      const baseLz = tz + fwdZ * lookDist + rightZ * steerLookAhead;
+      const lookDist = 36;
+      const baseLx = tx + fwdX * lookDist + rightX * (steerLook.current * 2.2);
+      const baseLy = 2.3 + cabPitch * 10; // slight pitch gaze into braking
+      const baseLz = tz + fwdZ * lookDist + rightZ * (steerLook.current * 2.2);
 
       lx = baseLx;
-      ly = baseLy;
+      ly = truckY + baseLy;
       lz = baseLz;
 
-      // Subtle engine vibration in cabin
-      const clock = performance.now() / 1000;
-      const speedFrac = clamp(Math.abs(sim.speed) / 11, 0, 1);
-      const engineVibe = 0.006 * Math.sin(clock * 32) * (0.4 + 0.6 * speedFrac);
-      ty += engineVibe;
+      // Subtle engine vibration and high-mass road breathing
+      const engineVibe = 0.005 * Math.sin(clock * 32) * (0.35 + 0.65 * speedFrac);
+      const roadBreathe = 0.012 * Math.sin(clock * 4.2) * speedFrac;
+      ty += engineVibe + roadBreathe;
     } else {
-      // Dynamic chase camera
-      targetFov = 55;
+      // Dynamic realistic chase camera (ETS2 inspired)
+      targetFov = 54 + speedFrac * 4; // subtle high-speed FOV expansion
+
       const sensor = useSensor.getState();
       const t = clamp(
         (sensor.tiltK - SENSOR.deadzoneK) / (1 - SENSOR.deadzoneK),
@@ -82,18 +117,28 @@ export function CameraRig() {
         CAMERA.idleAngleDeg + angleDeltaDeg(sensor.yawHeading, CAMERA.idleAngleDeg) * w;
       const theta = thetaDeg * DEG;
       const pitchFrac = clamp(Math.abs(sensor.pitch) / SENSOR.maxPitchDeg, 0, 1);
+
+      // Base chase distance modulated by inertia (pulls back on accel, compresses on braking)
+      const dynamicDist = CAMERA.chaseDist + speedInertia.current * 0.8;
       const height =
-        CAMERA.chaseHeight + (CAMERA.orbitHeight - CAMERA.chaseHeight) * pitchFrac;
+        CAMERA.chaseHeight +
+        (CAMERA.orbitHeight - CAMERA.chaseHeight) * pitchFrac -
+        speedInertia.current * 0.25;
 
-      const ang = theta + sim.yaw;
-      tx = sim.x + Math.cos(ang) * CAMERA.chaseDist;
-      ty = height;
-      tz = sim.z - Math.sin(ang) * CAMERA.chaseDist;
+      // Follow smoothed vehicle heading for natural trailer/body trailing
+      const ang = theta + smoothYaw.current;
+      tx = sim.x + Math.cos(ang) * dynamicDist;
+      ty = truckY + height;
+      tz = sim.z - Math.sin(ang) * dynamicDist;
 
-      // Look ahead of the truck
-      lx = sim.x + fwdX * 3.5;
-      ly = CAMERA.lookHeight;
-      lz = sim.z + fwdZ * 3.5;
+      // Subtle road breathing (high-mass vehicle suspension sensation)
+      const roadSway = Math.sin(clock * 2.8) * 0.025 * speedFrac;
+      ty += roadSway;
+
+      // Look ahead of the truck with turn apex anticipation
+      lx = sim.x + fwdX * 4.5 + rightX * steerLook.current;
+      ly = truckY + CAMERA.lookHeight + roadSway * 0.5;
+      lz = sim.z + fwdZ * 4.5 + rightZ * steerLook.current;
     }
 
     // Dynamic FOV interpolation
@@ -103,7 +148,11 @@ export function CameraRig() {
       camera.updateProjectionMatrix();
     }
 
-    const dampSpeed = sim.camMode === "cockpit" ? 1 - Math.exp(-22 * dt) : k;
+    const dampSpeed =
+      sim.camMode === "cockpit"
+        ? 1 - Math.exp(-24 * dt)
+        : 1 - Math.exp(-CAMERA.dampLambda * dt);
+
     camPos.current.x += (tx - camPos.current.x) * dampSpeed;
     camPos.current.y += (ty - camPos.current.y) * dampSpeed;
     camPos.current.z += (tz - camPos.current.z) * dampSpeed;
@@ -113,13 +162,12 @@ export function CameraRig() {
     lookTarget.current.y += (ly - lookTarget.current.y) * dampSpeed;
     lookTarget.current.z += (lz - lookTarget.current.z) * dampSpeed;
 
-    // Road impact / pothole camera jolt
+    // Road impact / pothole camera jolt (natural damped bump)
     const impact = useSensor.getState().impact;
     if (impact > 0.02) {
-      const clock = performance.now() / 1000;
-      const amp = impact * (sim.camMode === "cockpit" ? 0.14 : 0.06);
+      const amp = impact * (sim.camMode === "cockpit" ? 0.08 : 0.035);
       camPos.current.x += Math.sin(clock * 61) * amp;
-      camPos.current.y += Math.sin(clock * 47) * amp * 0.7;
+      camPos.current.y += Math.sin(clock * 47) * amp * 0.6;
       camPos.current.z += Math.sin(clock * 53) * amp;
     }
 

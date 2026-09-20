@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { useSim } from "@/lib/simStore";
-import { STOCKPILES, ROCK_SPOTS, PHYSICS } from "@/lib/constants";
+import { STOCKPILES, ROCK_SPOTS, PHYSICS, getRoadEdgePoint } from "@/lib/constants";
 
 const SIZE = 160;
 const RADIUS = SIZE / 2;
@@ -61,18 +61,39 @@ export function Minimap() {
       ctx.lineWidth = 2.5;
       ctx.stroke();
 
-      // 2. Main 18m-wide Haul Road (-190m to +190m along X=0)
+      // 2. Main 18m-wide Haul Road (synchronized with curved 3D road path)
+      ctx.beginPath();
+      for (let rz = -190; rz <= 190; rz += 5) {
+        const pt = getRoadEdgePoint(rz, -9.0);
+        if (rz === -190) ctx.moveTo(pt.x, pt.z);
+        else ctx.lineTo(pt.x, pt.z);
+      }
+      for (let rz = 190; rz >= -190; rz -= 5) {
+        const pt = getRoadEdgePoint(rz, 9.0);
+        ctx.lineTo(pt.x, pt.z);
+      }
+      ctx.closePath();
       ctx.fillStyle = "#292524";
-      ctx.fillRect(-9, -190, 18, 380);
+      ctx.fill();
 
       // Yellow road edge lines
       ctx.strokeStyle = "#e5a100";
       ctx.lineWidth = 0.8;
+      // Left edge line
       ctx.beginPath();
-      ctx.moveTo(-8.4, -190);
-      ctx.lineTo(-8.4, 190);
-      ctx.moveTo(8.4, -190);
-      ctx.lineTo(8.4, 190);
+      for (let rz = -190; rz <= 190; rz += 5) {
+        const pt = getRoadEdgePoint(rz, -8.4);
+        if (rz === -190) ctx.moveTo(pt.x, pt.z);
+        else ctx.lineTo(pt.x, pt.z);
+      }
+      ctx.stroke();
+      // Right edge line
+      ctx.beginPath();
+      for (let rz = -190; rz <= 190; rz += 5) {
+        const pt = getRoadEdgePoint(rz, 8.4);
+        if (rz === -190) ctx.moveTo(pt.x, pt.z);
+        else ctx.lineTo(pt.x, pt.z);
+      }
       ctx.stroke();
 
       // 3. Silt Pond / Drainage Sump at (-55, 35), radius 11
@@ -128,25 +149,53 @@ export function Minimap() {
 
       ctx.restore(); // Back to screen coordinates
 
-      // Vehicle Marker (Center chevron pointing straight UP)
+      // Concentric Radar Range Rings (25m & 50m tactical proximity rings)
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 4]);
+      for (const distM of [25, 50]) {
+        const rPx = distM * SCALE;
+        ctx.beginPath();
+        ctx.arc(cx, cy, rPx, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+
+      // Forward Headlight & Sensor Perception Cone (Subtle amber radar sweep)
+      const gradSweep = ctx.createRadialGradient(cx, cy, 2, cx, cy, 48 * SCALE);
+      gradSweep.addColorStop(0, "rgba(245, 158, 11, 0.16)");
+      gradSweep.addColorStop(0.45, "rgba(245, 158, 11, 0.06)");
+      gradSweep.addColorStop(1, "rgba(245, 158, 11, 0.0)");
+      ctx.fillStyle = gradSweep;
       ctx.beginPath();
-      ctx.moveTo(cx, cy - 8);
-      ctx.lineTo(cx - 5, cy + 5);
+      ctx.moveTo(cx, cy);
+      ctx.arc(cx, cy, 48 * SCALE, -Math.PI / 2 - 0.42, -Math.PI / 2 + 0.42);
+      ctx.closePath();
+      ctx.fill();
+
+      // Vehicle Marker (Center chevron with glowing drop shadow pointing straight UP)
+      ctx.save();
+      ctx.shadowColor = "rgba(245, 158, 11, 0.6)";
+      ctx.shadowBlur = 6;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - 9);
+      ctx.lineTo(cx - 5.5, cy + 5.5);
       ctx.lineTo(cx, cy + 2.5);
-      ctx.lineTo(cx + 5, cy + 5);
+      ctx.lineTo(cx + 5.5, cy + 5.5);
       ctx.closePath();
       ctx.fillStyle = "#f59e0b";
       ctx.fill();
       ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 1.2;
+      ctx.lineWidth = 1.4;
       ctx.stroke();
+      ctx.restore();
 
       ctx.restore(); // Release clip mask
 
-      // Outer Bezel Rim
+      // Outer Bezel Rim with Technical Ticks
       ctx.beginPath();
       ctx.arc(cx, cy, RADIUS - 2, 0, Math.PI * 2);
-      ctx.strokeStyle = "rgba(245, 158, 11, 0.4)";
+      ctx.strokeStyle = "rgba(245, 158, 11, 0.45)";
       ctx.lineWidth = 2.5;
       ctx.stroke();
 

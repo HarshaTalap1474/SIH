@@ -82,7 +82,7 @@ export function Rain() {
 
   useFrame((_, delta) => {
     const dt = Math.min(delta, 0.05);
-    const { rainMode, x: truckX, z: truckZ } = useSim.getState();
+    const { rainMode, x: truckX, z: truckZ, speed: truckSpeed, yaw: truckYaw } = useSim.getState();
 
     // Smooth target opacity transitions across states
     const targetOpacity =
@@ -144,6 +144,12 @@ export function Rain() {
     const windAngleX = isHigh ? 0.16 : 0.06;
     const windAngleZ = isHigh ? -0.12 : -0.03;
 
+    // Dynamic apparent rain slant from vehicle motion (ETS2 windshield rain physics)
+    const fwdX = -Math.sin(truckYaw);
+    const fwdZ = -Math.cos(truckYaw);
+    const dynSlantX = windAngleX - fwdX * truckSpeed * 0.024;
+    const dynSlantZ = windAngleZ - fwdZ * truckSpeed * 0.024;
+
     for (let i = 0; i < activeDropCount; i++) {
       const idx = i * 6;
       const speed = speeds[i] * speedMult;
@@ -178,8 +184,8 @@ export function Rain() {
         wz = truckZ + ((((dz + BOX_HALF) % BOX_SIZE) + BOX_SIZE) % BOX_SIZE) - BOX_HALF;
       }
 
-      const slantX = windAngleX * len;
-      const slantZ = windAngleZ * len;
+      const slantX = dynSlantX * len;
+      const slantZ = dynSlantZ * len;
 
       // Vertex 0: Top of raindrop streak
       arr[idx] = wx + slantX;
