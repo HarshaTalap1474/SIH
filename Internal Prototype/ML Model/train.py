@@ -4,7 +4,6 @@ Trains the 4-layer 3,605-parameter neural network on 200,000 Bailadila mine-site
 """
 
 import os
-import sys
 import time
 import numpy as np
 

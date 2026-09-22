@@ -4,7 +4,6 @@ Designed for microsecond-latency inference on edge microcontrollers and Python b
 High-Precision 4-Layer Architecture (3,605 parameters).
 """
 
-import json
 import os
 import numpy as np
 

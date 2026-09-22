@@ -174,7 +174,7 @@ export function Minimap() {
 
   return (
     <div className="pointer-events-none absolute bottom-5 right-5 z-20 flex flex-col items-center gap-1.5 select-none">
-      <div className="relative flex items-center justify-center rounded-full bg-zinc-950/90 shadow-2xl backdrop-blur-md">
+      <div className="flex items-center justify-center rounded-full border border-surface-4/50 bg-ink/85 p-1 shadow-lg backdrop-blur-md">
         <canvas
           ref={canvasRef}
           style={{ width: SIZE, height: SIZE }}
@@ -182,10 +182,12 @@ export function Minimap() {
         />
       </div>
 
-      <div className="flex items-center gap-2 rounded-full border border-white/10 bg-zinc-950/80 px-2.5 py-0.5 font-mono text-[9px] font-bold text-zinc-400 shadow-md backdrop-blur-md">
-        <span className="text-amber-400">HDG {headingDeg.toString().padStart(3, "0")}°</span>
-        <span className="text-zinc-600">|</span>
-        <span>X:{Math.round(x)} Z:{Math.round(z)}</span>
+      <div className="flex items-center gap-2 rounded-lg border border-surface-4/50 bg-ink/80 px-2.5 py-1 font-mono text-[11px] font-semibold text-fg-2 shadow-md backdrop-blur-md">
+        <span className="text-brand">HDG {headingDeg.toString().padStart(3, "0")}°</span>
+        <span className="text-fg-3">|</span>
+        <span>
+          X:{Math.round(x)} Z:{Math.round(z)}
+        </span>
       </div>
     </div>
   );

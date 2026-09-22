@@ -9,8 +9,6 @@ import os
 import sys
 import time
 import websockets
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import threading
 
 from tinyml_model import TinyMLCollisionModel
 

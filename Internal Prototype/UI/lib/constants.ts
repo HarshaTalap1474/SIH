@@ -33,6 +33,12 @@ export const PHYSICS = {
   truckRadius: 3.0,
 } as const;
 
+export const AEB = {
+  brakeStartM: 10,
+  brakeStopM: 6,
+  maxDecel: 16,
+} as const;
+
 export const SENSOR = {
   maxRollDeg: 30,
   maxPitchDeg: 30,

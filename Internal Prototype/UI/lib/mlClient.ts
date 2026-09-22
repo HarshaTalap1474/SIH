@@ -85,6 +85,22 @@ export interface RayHit {
   category: "big" | "small";
 }
 
+// Direction-specific closest gaps from the raw ray set (all 10 rays are always
+// stored locally at 30 Hz, even when the Python server is the risk source).
+export function frontGapM(rays: AdasState["rays"]): number {
+  return Math.min(rays.farLeft, rays.left, rays.center, rays.right, rays.farRight);
+}
+
+export function rearGapM(rays: AdasState["rays"]): number {
+  return Math.min(
+    rays.rearFarLeft,
+    rays.rearLeft,
+    rays.rearCenter,
+    rays.rearRight,
+    rays.rearFarRight
+  );
+}
+
 // Map-Aware Raycast distance calculation against obstacles and pit boundaries
 function castRay(
   originX: number,

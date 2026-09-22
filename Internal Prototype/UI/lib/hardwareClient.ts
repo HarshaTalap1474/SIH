@@ -13,27 +13,20 @@ export interface HardwareButtons {
 
 export interface HardwareState {
   connected: boolean;
-  connecting: boolean;
   lastSeen: number;
-  esp32Ip: string;
+  portInfo: string;
   buttons: HardwareButtons;
   estopActive: boolean;
-  usingCustomUrl: boolean;
   setConnected: (connected: boolean) => void;
   setButtons: (buttons: Partial<HardwareButtons>) => void;
-  setEsp32Ip: (ip: string) => void;
+  setPortInfo: (info: string) => void;
   setEstopActive: (active: boolean) => void;
-  setUsingCustomUrl: (usingCustomUrl: boolean) => void;
 }
-
-// Canonical mDNS WebSocket endpoint from ESP32 firmware (esp32-adas.local:81/ws)
-export const DEFAULT_MDNS_ENDPOINT = "ws://esp32-adas.local:81/ws";
 
 export const useHardwareStore = create<HardwareState>()((set) => ({
   connected: false,
-  connecting: true,
   lastSeen: 0,
-  esp32Ip: process.env.NEXT_PUBLIC_ESP32_WS || DEFAULT_MDNS_ENDPOINT,
+  portInfo: "",
   buttons: {
     throttle: false,
     brake: false,
@@ -42,26 +35,41 @@ export const useHardwareStore = create<HardwareState>()((set) => ({
     estop: false,
   },
   estopActive: false,
-  usingCustomUrl: false,
   setConnected: (connected) => set({ connected }),
   setButtons: (buttons) =>
     set((state) => ({ buttons: { ...state.buttons, ...buttons } })),
-  setEsp32Ip: (esp32Ip) => set({ esp32Ip }),
+  setPortInfo: (portInfo) => set({ portInfo }),
   setEstopActive: (estopActive) => set({ estopActive }),
-  setUsingCustomUrl: (usingCustomUrl) => set({ usingCustomUrl }),
 }));
 
+/**
+ * Splits a stream of text into lines on '\n' boundaries.
+ * Used to chunk USB serial data into individual JSON payloads.
+ */
+class LineBreakTransformer implements Transformer<string, string> {
+  private buf = "";
+
+  transform(chunk: string, controller: TransformStreamDefaultController<string>) {
+    this.buf += chunk;
+    const lines = this.buf.split("\n");
+    this.buf = lines.pop() || "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed) controller.enqueue(trimmed);
+    }
+  }
+
+  flush(controller: TransformStreamDefaultController<string>) {
+    const trimmed = this.buf.trim();
+    if (trimmed) controller.enqueue(trimmed);
+  }
+}
+
 export class HardwareClient {
-  private ws: WebSocket | null = null;
-  private isConnecting = false;
-  private reconnectTimer: NodeJS.Timeout | null = null;
-  private watchdogTimer: NodeJS.Timeout | null = null;
-  private handshakeTimer: NodeJS.Timeout | null = null;
-  private supervisorTimer: NodeJS.Timeout | null = null;
-  private shouldConnect = true;
-  private isCustomUrl = false;
-  private generation = 0;
-  private listenersAttached = false;
+  private port: SerialPort | null = null;
+  private reader: ReadableStreamDefaultReader<string> | null = null;
+  private readableStreamClosed: Promise<void> | null = null;
+  private running = false;
 
   // Zero-tare offsets for MPU6050
   private zeroPitch = 0;
@@ -80,119 +88,98 @@ export class HardwareClient {
     );
   }
 
-  public init() {
-    if (typeof window === "undefined") return;
+  /** Whether Web Serial API is available in this browser */
+  public isSupported(): boolean {
+    return typeof navigator !== "undefined" && "serial" in navigator;
+  }
 
-    if (!this.listenersAttached) {
-      this.listenersAttached = true;
-      // Re-connect aggressively when browser comes online or tab becomes visible
-      window.addEventListener("online", () => this.triggerImmediateReconnect());
-      document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "visible") {
-          this.triggerImmediateReconnect();
-        }
-      });
-
-      // Background supervisor loop: ensures the client is always actively listening
-      this.supervisorTimer = setInterval(() => {
-        if (
-          this.shouldConnect &&
-          !this.ws &&
-          !this.isConnecting &&
-          !useHardwareStore.getState().connected
-        ) {
-          this.connect();
-        }
-      }, 2000);
+  /**
+   * Open the serial port picker and start reading.
+   * MUST be called from a user-gesture event handler (click).
+   */
+  public async connect(): Promise<void> {
+    if (!this.isSupported()) {
+      console.warn("[Hardware] Web Serial API not supported in this browser");
+      return;
     }
 
-    this.connect();
-  }
+    // Already connected
+    if (this.port && this.running) return;
 
-  public setCustomUrl(url: string) {
-    this.isCustomUrl = true;
-    useHardwareStore.getState().setUsingCustomUrl(true);
-    useHardwareStore.getState().setEsp32Ip(url);
-    this.disconnect(true);
-    this.connect();
-  }
+    try {
+      // Browser shows port picker (requires user gesture)
+      const port = await navigator.serial.requestPort();
+      await port.open({ baudRate: 921600 });
 
-  public clearCustomUrl() {
-    this.isCustomUrl = false;
-    useHardwareStore.getState().setUsingCustomUrl(false);
-    useHardwareStore.getState().setEsp32Ip(DEFAULT_MDNS_ENDPOINT);
-    this.disconnect(true);
-    this.connect();
-  }
+      this.port = port;
+      this.running = true;
 
-  private triggerImmediateReconnect() {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      if (this.reconnectTimer) {
-        clearTimeout(this.reconnectTimer);
-        this.reconnectTimer = null;
-      }
+      // Extract port info for display
+      const info = port.getInfo();
+      const label =
+        info.usbVendorId && info.usbProductId
+          ? `USB ${info.usbVendorId.toString(16)}:${info.usbProductId.toString(16)}`
+          : "Serial Device";
+      useHardwareStore.setState({ connected: true, portInfo: label });
+      console.log(`[Hardware] Connected to ${label} (USB Serial @921600)`);
+
+      // Start reading in background
+      this.readLoop();
+    } catch (err) {
+      // User cancelled the picker or open failed
+      console.warn("[Hardware] Connect failed:", err);
       this.cleanupConnection();
-      this.connect();
     }
   }
 
-  public connect() {
-    this.shouldConnect = true;
+  /** Close the serial port and stop reading */
+  public async disconnect(): Promise<void> {
+    this.running = false;
 
-    // Already connected and operational
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      return;
-    }
-
-    // Already in the middle of a fresh handshake
-    if (this.isConnecting && this.ws && this.ws.readyState === WebSocket.CONNECTING) {
-      return;
+    try {
+      if (this.reader) {
+        await this.reader.cancel();
+        this.reader = null;
+      }
+      if (this.readableStreamClosed) {
+        await this.readableStreamClosed.catch(() => { });
+        this.readableStreamClosed = null;
+      }
+      if (this.port) {
+        await this.port.close();
+        this.port = null;
+      }
+    } catch {
+      // ignore close errors
     }
 
     this.cleanupConnection();
-    this.isConnecting = true;
-    this.generation++;
-    const gen = this.generation;
+    console.log("[Hardware] Disconnected");
+  }
 
-    const endpoint = this.isCustomUrl
-      ? useHardwareStore.getState().esp32Ip
-      : DEFAULT_MDNS_ENDPOINT;
+  /**
+   * Background read loop: pipes port.readable through TextDecoder + LineBreak,
+   * parses each JSON line, and feeds stores — identical data flow to the old
+   * WebSocket onmessage handler.
+   */
+  private async readLoop(): Promise<void> {
+    if (!this.port?.readable) return;
 
-    useHardwareStore.setState({ esp32Ip: endpoint, connecting: true });
+    const textDecoder = new TextDecoderStream();
+    this.readableStreamClosed = this.port.readable.pipeTo(textDecoder.writable);
+
+    const lineStream = textDecoder.readable.pipeThrough(
+      new TransformStream(new LineBreakTransformer())
+    );
+    this.reader = lineStream.getReader();
 
     try {
-      const socket = new WebSocket(endpoint);
-      this.ws = socket;
-
-      // 2.5-second handshake watchdog: if browser hangs during mDNS resolution, abort and retry
-      this.handshakeTimer = setTimeout(() => {
-        if (gen !== this.generation) return;
-        if (socket.readyState !== WebSocket.OPEN) {
-          try {
-            socket.close();
-          } catch {
-            // ignore
-          }
-          this.cleanupConnection();
-          this.scheduleReconnect(800);
-        }
-      }, 2500);
-
-      socket.onopen = () => {
-        if (gen !== this.generation) return;
-        this.clearHandshakeTimer();
-        this.isConnecting = false;
-        useHardwareStore.setState({ connected: true, connecting: false });
-        console.log(`[Hardware] Connected to ESP32 mDNS (${endpoint})`);
-        this.resetWatchdog();
-      };
-
-      socket.onmessage = (event) => {
-        if (gen !== this.generation) return;
-        this.resetWatchdog();
+      while (this.running) {
+        const { value, done } = await this.reader.read();
+        if (done) break;
 
         try {
-          const data = JSON.parse(event.data);
+          const data = JSON.parse(value);
 
           if (data.mpu) {
             const rawPitch = Number(data.mpu.pitch) || 0;
@@ -227,100 +214,21 @@ export class HardwareClient {
 
           useHardwareStore.setState({ lastSeen: Date.now(), connected: true });
         } catch {
-          // ignore telemetry frame parse error
+          // ignore malformed JSON lines (calibration logs, boot messages, etc.)
         }
-      };
-
-      socket.onclose = () => {
-        if (gen !== this.generation) return;
-        this.clearHandshakeTimer();
-        this.cleanupConnection();
-        this.scheduleReconnect(1000);
-      };
-
-      socket.onerror = () => {
-        if (gen !== this.generation) return;
-        try {
-          socket.close();
-        } catch {
-          // ignore
-        }
-      };
-    } catch {
-      this.cleanupConnection();
-      this.scheduleReconnect(1000);
-    }
-  }
-
-  public disconnect(keepSupervising = false) {
-    this.shouldConnect = keepSupervising;
-    this.generation++;
-    this.clearHandshakeTimer();
-
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-    if (this.watchdogTimer) {
-      clearTimeout(this.watchdogTimer);
-      this.watchdogTimer = null;
-    }
-    if (this.ws) {
-      try {
-        this.ws.close();
-      } catch {
-        // ignore
       }
-      this.ws = null;
-    }
-    this.cleanupConnection();
-  }
-
-  private resetWatchdog() {
-    if (this.watchdogTimer) {
-      clearTimeout(this.watchdogTimer);
-    }
-    const gen = this.generation;
-
-    // 2.5 second watchdog for continuous 50Hz telemetry packets
-    this.watchdogTimer = setTimeout(() => {
-      if (gen !== this.generation || !this.ws) return;
-      console.warn("[Hardware] Telemetry timeout (2.5s) — reconnecting mDNS...");
-      const socket = this.ws;
+    } catch (err) {
+      // ReadableStream error (port disconnected, cable unplugged)
+      console.warn("[Hardware] Read error (cable disconnected?):", err);
+    } finally {
+      this.reader = null;
       this.cleanupConnection();
-      try {
-        socket.close();
-      } catch {
-        // ignore
-      }
-      this.scheduleReconnect(500);
-    }, 2500);
-  }
-
-  private clearHandshakeTimer() {
-    if (this.handshakeTimer) {
-      clearTimeout(this.handshakeTimer);
-      this.handshakeTimer = null;
     }
   }
 
   private cleanupConnection() {
-    this.ws = null;
-    this.isConnecting = false;
-    this.clearHandshakeTimer();
-    if (this.watchdogTimer) {
-      clearTimeout(this.watchdogTimer);
-      this.watchdogTimer = null;
-    }
-    useHardwareStore.setState({ connected: false, connecting: this.shouldConnect });
-  }
-
-  private scheduleReconnect(delayMs = 1000) {
-    if (!this.shouldConnect || this.reconnectTimer) return;
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
-      this.connect();
-    }, delayMs);
+    this.running = false;
+    useHardwareStore.setState({ connected: false, portInfo: "" });
   }
 }
 

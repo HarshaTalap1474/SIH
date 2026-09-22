@@ -1,15 +1,16 @@
 # ESP32-C3 Super Mini Firmware — Build & Flash Guide
 
-Three sketches in this folder:
+Five sketches in this folder:
 
 | File | Purpose |
 |------|---------|
-| `main_optimized/main_optimized.ino` | **Recommended Production V2** — Simultaneous AP + STA (AP always visible), Web dashboard on port 80, mDNS, burst I2C reads |
-| `main/main.ino` | Standard production firmware — MPU6050 + 5 buttons + WebSocket broadcast @50Hz |
+| `main_serial/main_serial.ino` | **Recommended for Wired Demo** — USB Serial mode (no WiFi needed). Same MPU6050 + buttons, JSON via `Serial.println()` @50Hz. Browser reads via Web Serial API. No external libraries required. |
+| `main_optimized/main_optimized.ino` | WiFi V2 — Simultaneous AP + STA (AP always visible), Web dashboard on port 80, mDNS, burst I2C reads |
+| `main/main.ino` | WiFi V1 — MPU6050 + 5 buttons + WebSocket broadcast @50Hz |
 | `test_wiring/test_wiring.ino` | **Diagnostic** — verify every connection before flashing main.ino. DO THIS FIRST. |
 | `serial_sscope/serial_sscope.ino` | Serial-only readout (no WiFi/WebSocket) — prints tilt direction + pressed button + `key:value` lines for the Arduino Serial Plotter / GY-SScope |
 
-> Arduino requires each sketch in its own folder named after the sketch. Open `main_optimized/main_optimized.ino`, `main/main.ino`, `test_wiring/test_wiring.ino`, or `serial_sscope/serial_sscope.ino` directly in the IDE.
+> Arduino requires each sketch in its own folder named after the sketch. Open `main_serial/main_serial.ino`, `main_optimized/main_optimized.ino`, `main/main.ino`, `test_wiring/test_wiring.ino`, or `serial_sscope/serial_sscope.ino` directly in the IDE.
 
 ---
 

@@ -2,13 +2,13 @@
 
 import { useEffect, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
-import { BLOCKERS, DUMPER, PHYSICS, clamp, damp } from "@/lib/constants";
+import { AEB, BLOCKERS, DUMPER, PHYSICS, clamp, damp } from "@/lib/constants";
 import { isKeyDown } from "@/lib/keys";
 import { useSensor } from "@/lib/virtualSensor";
 import { useSim, GearMode } from "@/lib/simStore";
 import { rigParts } from "@/lib/rig";
-import { adasClient, useAdasStore } from "@/lib/mlClient";
-import { hwClient, useHardwareStore } from "@/lib/hardwareClient";
+import { adasClient, useAdasStore, frontGapM, rearGapM } from "@/lib/mlClient";
+import { useHardwareStore } from "@/lib/hardwareClient";
 
 export function Controls() {
   const prevSpeed = useRef(0);
@@ -23,7 +23,6 @@ export function Controls() {
 
   useEffect(() => {
     adasClient.init();
-    hwClient.init();
   }, []);
 
   useFrame((state, rawDt) => {
@@ -93,23 +92,39 @@ export function Controls() {
     const adas = useAdasStore.getState();
 
     // Autonomous Emergency Brake & E-Stop Interlock
-    // Front AEB triggers when moving forward toward an obstacle
-    // Rear AEB triggers when reversing toward an obstacle
+    // AEB is a smooth glide: braking starts at AEB.brakeStartM (10m) gap and
+    // decelerates kinematically (a = v² / 2·glide) so the truck comes to rest
+    // at AEB.brakeStopM (6m) gap. Physical E-Stop keeps a hard stop.
+    // Front and rear gaps are direction-specific: a rear detection only ever
+    // brakes reversing motion, never forward travel.
     const isEStopped = estopLatched.current;
-    const isAebForward = adas.emergencyBrake && !isReversing;
-    const isAebRear = adas.emergencyBrake && isReversing;
-
-    const isBlockedAhead = isEStopped || isAebForward;
-    const isBlockedBehind = isEStopped || isAebRear;
+    const fwdGap = frontGapM(adas.rays);
+    const rearGap = rearGapM(adas.rays);
+    const inFwdZone = !isReversing && fwdGap <= AEB.brakeStartM;
+    const inRevZone = isReversing && rearGap <= AEB.brakeStartM;
 
     let throttle = keyThrottle;
-    if (isBlockedAhead) {
+    if (isEStopped) {
       if (throttle > 0) throttle = 0;
       if (speed > 0) speed = Math.max(0, speed - PHYSICS.brake * 4.0 * dt);
-    }
-    if (isBlockedBehind) {
       if (throttle < 0) throttle = 0;
       if (speed < 0) speed = Math.min(0, speed + PHYSICS.brake * 4.0 * dt);
+    }
+    if (inFwdZone) {
+      if (throttle > 0) throttle = 0;
+      if (speed > 0) {
+        const glideM = Math.max(fwdGap - AEB.brakeStopM, 0.1);
+        const decel = Math.min(AEB.maxDecel, (speed * speed) / (2 * glideM));
+        speed = Math.max(0, speed - decel * dt);
+      }
+    }
+    if (inRevZone) {
+      if (throttle < 0) throttle = 0;
+      if (speed < 0) {
+        const glideM = Math.max(rearGap - AEB.brakeStopM, 0.1);
+        const decel = Math.min(AEB.maxDecel, (speed * speed) / (2 * glideM));
+        speed = Math.min(0, speed + decel * dt);
+      }
     }
 
     const maxSpeed = boost
@@ -125,7 +140,7 @@ export function Controls() {
       } else {
         speed = Math.max(target, speed - PHYSICS.brake * dt);
       }
-    } else if (!(isBlockedAhead && speed > 0) && !(isBlockedBehind && speed < 0)) {
+    } else if (!inFwdZone && !inRevZone) {
       const dir = Math.sign(speed);
       speed -= dir * Math.min(Math.abs(speed), PHYSICS.coastDecel * dt);
       if (Math.sign(speed) !== dir) speed = 0;

@@ -28,7 +28,7 @@ export default function Page() {
       <div className="relative flex flex-1 min-h-0 w-full overflow-hidden">
         <DashboardPanel />
 
-        <section className="relative flex-1 h-full w-full overflow-hidden bg-stone-950">
+        <section className="relative h-full w-full min-w-0 flex-1 overflow-hidden bg-stone-950">
           <Scene />
           <Minimap />
         </section>

@@ -1,11 +1,12 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useSim } from "@/lib/simStore";
 import { useAdasStore } from "@/lib/mlClient";
 import { useHardwareStore, hwClient } from "@/lib/hardwareClient";
+import { Icon } from "@/components/ui/Icon";
 
 export function Header() {
-  // Sim Store
   const camMode = useSim((s) => s.camMode);
   const headlights = useSim((s) => s.headlights);
   const fogMode = useSim((s) => s.fogMode);
@@ -16,194 +17,144 @@ export function Header() {
   const toggleRain = useSim((s) => s.toggleRain);
   const resetSim = useSim((s) => s.resetSim);
 
-  // ADAS Store
   const adasConnected = useAdasStore((s) => s.connected);
   const risk = useAdasStore((s) => s.collisionRisk);
   const emergencyBrake = useAdasStore((s) => s.emergencyBrake);
 
-  // Hardware Store
   const hwConnected = useHardwareStore((s) => s.connected);
-  const hwConnecting = useHardwareStore((s) => s.connecting);
-  const esp32Ip = useHardwareStore((s) => s.esp32Ip);
-  const usingCustomUrl = useHardwareStore((s) => s.usingCustomUrl);
+  const portInfo = useHardwareStore((s) => s.portInfo);
 
   const isCritical = adasConnected && (risk === "CRITICAL" || emergencyBrake);
   const isCaution = adasConnected && risk === "CAUTION" && !isCritical;
 
-  return (
-    <header className="relative z-30 flex h-14 w-full select-none items-center justify-between border-b border-white/10 bg-zinc-950/95 px-5 shadow-2xl backdrop-blur-2xl">
-      {/* ========================================================================= */}
-      {/* 1. BRANDING & TEAM IDENTITY                                              */}
-      {/* ========================================================================= */}
-      <div className="flex items-center gap-3">
-        <div className="relative flex h-9 w-9 items-center justify-center rounded-xl border border-amber-500/30 bg-gradient-to-br from-amber-500/20 via-orange-500/10 to-transparent shadow-[0_0_15px_rgba(245,158,11,0.2)]">
-          <span className="font-mono text-base font-black tracking-tighter text-amber-400">
-            W
-          </span>
-          <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full bg-amber-400 shadow-[0_0_6px_#f59e0b] animate-pulse" />
-        </div>
+  const [serialSupported, setSerialSupported] = useState(false);
 
-        <div>
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setSerialSupported(hwClient.isSupported()));
+    return () => cancelAnimationFrame(id);
+  }, []);
+
+  const bannerIcon = !adasConnected ? "gauge" : isCritical ? "alert" : isCaution ? "alert" : "check";
+  const bannerText = !adasConnected
+    ? "SYSTEM STANDBY — PYTHON OFFLINE"
+    : isCritical
+      ? "CRITICAL: EMERGENCY BRAKE ENGAGED"
+      : isCaution
+        ? "CAUTION: OBSTACLE PROXIMITY ALERT"
+        : "HAUL ROAD CLEAR";
+
+  const bannerCls = !adasConnected
+    ? "border-surface-4/60 bg-surface-2 text-fg-3"
+    : isCritical
+      ? "border-danger/60 bg-danger/15 text-danger"
+      : isCaution
+        ? "border-caution/50 bg-caution/10 text-caution"
+        : "border-ok/40 bg-ok/10 text-ok";
+
+  const rainActive = rainMode !== "none";
+  const rainCls = rainActive ? "bg-info/15 text-info border-info/30" : "text-fg-2 hover:bg-surface-3 hover:text-fg";
+  const rainLabel = rainMode === "none" ? "Rain" : rainMode === "medium" ? "Medium" : "Heavy";
+
+  return (
+    <header className="relative z-30 flex h-14 w-full select-none items-center justify-between gap-3 border-b border-surface-4/50 bg-ink/95 px-4 shadow-lg backdrop-blur-md">
+      {/* ── Branding ────────────────────────────────────────────────────── */}
+      <div className="flex min-w-0 items-center gap-2.5">
+        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md border border-brand/30 bg-surface-2">
+          <span className="font-mono text-sm font-black tracking-tighter text-brand">W</span>
+        </div>
+        <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <h1 className="bg-gradient-to-r from-amber-300 via-amber-400 to-orange-400 bg-clip-text text-sm font-black tracking-wider text-transparent uppercase">
-              WeBuildZ
-            </h1>
-            <span className="rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[9px] font-bold text-zinc-400 tracking-wider">
+            <h1 className="text-[13px] font-bold uppercase tracking-wider text-fg">WeBuildZ</h1>
+            <span className="pill hidden md:inline-flex border-brand/25 bg-brand/10 text-brand">
               HEMM 797F
             </span>
           </div>
-          <p className="text-[10px] font-medium tracking-tight text-zinc-400">
-            Autonomous Safety & Digital Twin
+          <p className="hidden truncate text-[11px] font-medium text-fg-3 md:block">
+            Autonomous Safety &amp; Digital Twin
           </p>
         </div>
       </div>
 
-      {/* ========================================================================= */}
-      {/* 2. DYNAMIC THREAT ALERT BANNER (CENTER)                                  */}
-      {/* ========================================================================= */}
-      <div className="flex items-center">
-        <div
-          className={`flex items-center gap-2 rounded-full px-4 py-1.5 font-mono text-[11px] font-black uppercase tracking-wider transition-all duration-200 border ${
-            !adasConnected
-              ? "border-white/5 bg-zinc-900/60 text-zinc-400"
-              : isCritical
-              ? "border-red-500/60 bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-[0_0_20px_rgba(239,68,68,0.7)] animate-pulse"
-              : isCaution
-              ? "border-amber-500/50 bg-amber-500/20 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.3)]"
-              : "border-emerald-500/30 bg-emerald-500/15 text-emerald-300 shadow-[0_0_8px_rgba(16,185,129,0.2)]"
-          }`}
-        >
-          <span className="text-xs">
-            {!adasConnected ? "⚪" : isCritical ? "🛑" : isCaution ? "⚠" : "✔"}
-          </span>
-          <span>
-            {!adasConnected
-              ? "SYSTEM STANDBY (PYTHON OFFLINE)"
-              : isCritical
-              ? "CRITICAL: EMERGENCY BRAKE ENGAGED"
-              : isCaution
-              ? "CAUTION: OBSTACLE PROXIMITY ALERT"
-              : "HAUL ROAD CLEAR"}
+      {/* ── System status banner ────────────────────────────────────────── */}
+      <div className="hidden md:flex min-w-0 flex-1 justify-center px-2">
+        <div className={`pill border px-3 py-1.5 text-[11px] uppercase tracking-wider ${bannerCls}`}>
+          <Icon name={bannerIcon} className={`h-3.5 w-3.5 ${isCritical ? "animate-pulse" : ""}`} />
+          <span className="hidden truncate xl:inline">{bannerText}</span>
+          <span className="truncate xl:hidden">
+            {!adasConnected ? "STANDBY" : isCritical ? "CRITICAL" : isCaution ? "CAUTION" : "CLEAR"}
           </span>
         </div>
       </div>
 
-      {/* ========================================================================= */}
-      {/* 3. QUICK ACTIONS TOOLBAR & INDUSTRIAL TELEMETRY HUB                      */}
-      {/* ========================================================================= */}
+      {/* ── Toolbar + telemetry status ──────────────────────────────────── */}
       <div className="flex items-center gap-3">
-        {/* Quick Controls Toolbar */}
-        <div className="flex items-center gap-1 rounded-xl border border-white/10 bg-white/[0.03] p-1">
+        <div className="flex items-center gap-0.5 rounded-lg border border-surface-4/60 bg-surface-1 p-0.5">
           <button
             type="button"
             onClick={resetSim}
             title="Reset Simulation (R)"
-            className="cursor-pointer rounded-lg px-2.5 py-1 font-mono text-[10px] font-bold text-zinc-300 transition-all hover:bg-white/10 hover:text-white active:scale-95"
+            className="icon-btn"
           >
-            ↺ Reset
+            <Icon name="reset" className="h-4 w-4" />
+            <span className="hidden lg:inline">Reset</span>
           </button>
 
           <button
             type="button"
             onClick={toggleCam}
             title="Cycle Camera: Chase -> Cockpit -> Top (C)"
-            className="cursor-pointer rounded-lg px-2.5 py-1 font-mono text-[10px] font-bold text-amber-400 transition-all hover:bg-white/10 active:scale-95 capitalize"
+            className="icon-btn capitalize"
           >
-            📷 {camMode}
+            <Icon name="camera" className="h-4 w-4" />
+            <span className="hidden lg:inline">{camMode}</span>
           </button>
 
           <button
             type="button"
             onClick={toggleHeadlights}
             title="Toggle Headlights (H)"
-            className={`cursor-pointer rounded-lg px-2.5 py-1 font-mono text-[10px] font-bold transition-all active:scale-95 ${
-              headlights
-                ? "bg-amber-500/20 text-amber-300 border border-amber-500/30 shadow-[0_0_8px_rgba(245,158,11,0.25)]"
-                : "text-zinc-400 hover:bg-white/10 hover:text-white"
+            className={`icon-btn ${
+              headlights ? "border-brand/30 bg-brand/10 text-brand" : ""
             }`}
           >
-            💡 {headlights ? "ON" : "OFF"}
+            <Icon name="headlight" className="h-4 w-4" />
+            <span className="hidden lg:inline">{headlights ? "On" : "Off"}</span>
           </button>
 
           <button
             type="button"
             onClick={toggleFog}
             title="Cycle Fog Density (F)"
-            className="cursor-pointer rounded-lg px-2.5 py-1 font-mono text-[10px] font-bold text-zinc-300 transition-all hover:bg-white/10 hover:text-white active:scale-95 capitalize"
+            className="icon-btn capitalize"
           >
-            🌫 {fogMode}
+            <Icon name="fog" className="h-4 w-4" />
+            <span className="hidden lg:inline">{fogMode}</span>
           </button>
 
-          {/* Rain Environment Control */}
           <button
             type="button"
             onClick={toggleRain}
             title="Cycle Rain Intensity (T)"
-            className={`cursor-pointer rounded-lg px-2.5 py-1 font-mono text-[10px] font-bold transition-all active:scale-95 uppercase ${
-              rainMode === "high"
-                ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 shadow-[0_0_8px_rgba(6,182,212,0.3)]"
-                : rainMode === "medium"
-                ? "bg-blue-500/20 text-blue-300 border border-blue-500/30 shadow-[0_0_8px_rgba(59,130,246,0.25)]"
-                : "text-zinc-300 hover:bg-white/10 hover:text-white"
-            }`}
+            className={`icon-btn capitalize ${rainCls}`}
           >
-            🌧 {rainMode === "none" ? "NO RAIN" : rainMode === "medium" ? "MEDIUM RAIN" : "HIGH RAIN"}
+            <Icon name="rain" className="h-4 w-4" />
+            <span className="hidden lg:inline">{rainLabel}</span>
           </button>
         </div>
 
-        {/* Vertical Divider */}
-        <div className="h-6 w-px bg-white/10" />
+        <div className="hidden h-6 w-px bg-surface-4/60 sm:block" />
 
-        {/* Industrial Telemetry Hub */}
         <div className="flex items-center gap-2">
-          {/* ESP32 Hardware Status */}
-          <div className="relative group">
-            <button
-              type="button"
-              onClick={() => {
-                const current = useHardwareStore.getState().esp32Ip;
-                const next = window.prompt("ESP32 WebSocket URL:", current);
-                if (next && next.trim()) {
-                  hwClient.setCustomUrl(next.trim());
-                }
-              }}
-              className={`cursor-pointer flex items-center gap-1.5 rounded-xl border px-2.5 py-1 font-mono text-[10px] font-bold tracking-wider uppercase transition-all ${
-                hwConnected
-                  ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.25)]"
-                  : hwConnecting
-                  ? "border-amber-500/40 bg-amber-500/10 text-amber-300/90 shadow-[0_0_8px_rgba(245,158,11,0.2)]"
-                  : "border-white/10 bg-zinc-900 text-zinc-400 hover:border-white/20"
-              }`}
-              title={`ESP32 mDNS Link\nAddress: ${esp32Ip}\nStatus: ${
-                hwConnected ? "Connected (50Hz)" : hwConnecting ? "Listening & Reconnecting (mDNS)..." : "Disconnected"
-              }\nClick to change URL`}
-            >
-              <span
-                className={`h-1.5 w-1.5 rounded-full ${
-                  hwConnected
-                    ? "bg-emerald-400 shadow-[0_0_6px_#34d399] animate-pulse"
-                    : hwConnecting
-                    ? "bg-amber-400 shadow-[0_0_6px_#f59e0b] animate-pulse"
-                    : "bg-zinc-500"
-                }`}
-              />
-              <span>{hwConnected ? "ESP32 50Hz" : hwConnecting ? "ESP32 LISTENING" : "ESP32 OFF"}</span>
-            </button>
-          </div>
+          {hwConnected ? (
+            <>
+              <div
+                className="pill hidden border-ok/40 bg-ok/10 text-ok md:inline-flex"
+                title={`Controller connected via USB Serial\n${portInfo}`}
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-ok" />
+                <span>Controller Live</span>
+              </div>
 
-          {/* ESP32 Auto / Cal Buttons if connected */}
-          {hwConnected && (
-            <div className="flex items-center gap-1">
-              {usingCustomUrl && (
-                <button
-                  type="button"
-                  onClick={() => hwClient.clearCustomUrl()}
-                  title="Reset to Auto Endpoint Detection"
-                  className="cursor-pointer rounded-md border border-sky-500/30 bg-sky-500/10 px-1.5 py-1 font-mono text-[8px] font-bold text-sky-300 hover:bg-sky-500/20"
-                >
-                  AUTO
-                </button>
-              )}
               <button
                 type="button"
                 onClick={() => {
@@ -211,29 +162,53 @@ export function Header() {
                   window.alert("MPU6050 tared ✓ — current orientation zeroed.");
                 }}
                 title="Tare MPU6050: Zero Pitch & Roll"
-                className="cursor-pointer rounded-md border border-amber-500/30 bg-amber-500/10 px-1.5 py-1 font-mono text-[8px] font-bold text-amber-300 hover:bg-amber-500/20"
+                className="icon-btn border-brand/25 bg-brand/10 text-brand"
               >
-                CAL
+                <Icon name="crosshair" className="h-4 w-4" />
+                <span className="hidden md:inline">Tare</span>
               </button>
-            </div>
+
+              <button
+                type="button"
+                onClick={() => hwClient.disconnect()}
+                title="Disconnect USB Serial Controller"
+                className="icon-btn border-danger/30 bg-danger/10 text-danger"
+              >
+                <Icon name="power" className="h-4 w-4" />
+                <span className="hidden md:inline">Off</span>
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => hwClient.connect()}
+              disabled={!serialSupported}
+              title={
+                serialSupported
+                  ? "Connect ESP32 controller via USB cable"
+                  : "Web Serial API not supported — use Chrome or Edge"
+              }
+              className={`icon-btn uppercase ${
+                serialSupported
+                  ? "border-info/40 bg-info/10 text-info hover:bg-info/15"
+                  : "cursor-not-allowed border-surface-4/60 bg-surface-1 text-fg-3"
+              }`}
+            >
+              <Icon name="plug" className="h-4 w-4" />
+              <span className="hidden md:inline">Connect</span>
+            </button>
           )}
 
-          {/* TinyML Python Inference Link */}
           <div
-            className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-1 font-mono text-[10px] font-bold tracking-wider uppercase transition-all ${
+            className={`pill uppercase ${
               adasConnected
-                ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.25)]"
-                : "border-white/10 bg-zinc-900 text-zinc-500"
+                ? "border-ok/40 bg-ok/10 text-ok"
+                : "border-surface-4/60 bg-surface-1 text-fg-3"
             }`}
           >
-            <span
-              className={`h-1.5 w-1.5 rounded-full ${
-                adasConnected
-                  ? "bg-emerald-400 shadow-[0_0_6px_#34d399] animate-pulse"
-                  : "bg-zinc-500"
-              }`}
-            />
-            <span>{adasConnected ? "AI LIVE" : "AI OFFLINE"}</span>
+            <span className={`h-1.5 w-1.5 rounded-full ${adasConnected ? "bg-ok" : "bg-fg-3"}`} />
+            <span className="hidden md:inline">{adasConnected ? "AI Live" : "AI Offline"}</span>
+            <span className="md:hidden">{adasConnected ? "AI" : "ML"}</span>
           </div>
         </div>
       </div>

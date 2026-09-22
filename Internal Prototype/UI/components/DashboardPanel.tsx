@@ -1,301 +1,234 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useSim } from "@/lib/simStore";
 import { useSensor } from "@/lib/virtualSensor";
 import { useAdasStore } from "@/lib/mlClient";
 import { useHardwareStore } from "@/lib/hardwareClient";
+import { Icon } from "@/components/ui/Icon";
 
-const GEAR_LABELS: Record<string, string> = {
-  P: "P",
-  R: "R",
-  N: "N",
-  D: "D",
-  B: "BST",
+const GEAR_LABELS: Record<string, string> = { P: "P", R: "R", N: "N", D: "D", B: "BST" };
+
+const GEAR_ACTIVE_CLS: Record<string, string> = {
+  P: "border-fg-3/60 bg-surface-3 text-fg",
+  N: "border-fg-3/60 bg-surface-3 text-fg",
+  R: "border-danger/60 bg-danger/15 text-danger",
+  D: "border-ok/60 bg-ok/15 text-ok",
+  B: "border-info/60 bg-info/15 text-info",
 };
 
+function Section({
+  title,
+  right,
+  children,
+}: {
+  title: string;
+  right?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="card flex flex-col gap-3 p-3.5">
+      <div className="card-header">
+        <span className="card-title">{title}</span>
+        {right}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function StatusDot({ tone }: { tone: "ok" | "danger" | "caution" | "muted" }) {
+  const cls =
+    tone === "ok"
+      ? "bg-ok"
+      : tone === "danger"
+        ? "bg-danger"
+        : tone === "caution"
+          ? "bg-caution"
+          : "bg-fg-3";
+  return <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${cls}`} />;
+}
+
 export function DashboardPanel() {
-  // Sim Store
+  // ── Sim ───────────────────────────────────────────────────────────────────
   const speedKmh = useSim((s) => s.speedKmh);
   const boost = useSim((s) => s.boost);
   const gear = useSim((s) => s.gear);
 
-  // Sensor Store
-  const pitch = useSensor((s) => s.pitch);
-  const roll = useSensor((s) => s.roll);
+  // ── Sensor ────────────────────────────────────────────────────────────────
   const roadAnomaly = useSensor((s) => s.roadAnomaly);
 
-  // Hardware Store
+  // ── Hardware ──────────────────────────────────────────────────────────────
   const estopActive = useHardwareStore((s) => s.estopActive);
 
-  // ADAS Store
+  // ── ADAS ──────────────────────────────────────────────────────────────────
   const connected = useAdasStore((s) => s.connected);
   const risk = useAdasStore((s) => s.collisionRisk);
   const emergencyBrake = useAdasStore((s) => s.emergencyBrake);
   const closestObstacleM = useAdasStore((s) => s.closestObstacleM);
   const ttcSeconds = useAdasStore((s) => s.ttcSeconds);
   const steeringGuidance = useAdasStore((s) => s.steeringGuidance);
+  const threatDirection = useAdasStore((s) => s.threatDirection);
 
   const isCritical = connected && (risk === "CRITICAL" || emergencyBrake);
   const isCaution = connected && risk === "CAUTION" && !isCritical;
-  const isRollover = Math.abs(roll) > 15 || Math.abs(pitch) > 15;
 
-  // Clearance metrics
+  const riskLabel = !connected ? "STANDBY" : isCritical ? "CRITICAL" : isCaution ? "CAUTION" : "SAFE";
+  const riskCls = !connected
+    ? "border-surface-4/60 bg-surface-1 text-fg-3"
+    : isCritical
+      ? "border-danger/50 bg-danger/15 text-danger animate-pulse"
+      : isCaution
+        ? "border-caution/50 bg-caution/15 text-caution"
+        : "border-ok/40 bg-ok/10 text-ok";
+
+  // ── Clearance colouring + thresholds (unchanged logic) ───────────────────
   const isClear = closestObstacleM >= 79;
-  const distColor =
-    closestObstacleM < 12
-      ? "text-red-400 drop-shadow-[0_0_12px_rgba(239,68,68,0.7)]"
-      : closestObstacleM < 25
-      ? "text-amber-400 drop-shadow-[0_0_10px_rgba(245,158,11,0.5)]"
-      : "text-emerald-400";
+  const distTone =
+    closestObstacleM < 12 ? "text-danger" : closestObstacleM < 25 ? "text-caution" : "text-ok";
 
-  // Steering recommendation
-  let steerBanner = {
-    text: "▲ PATH CLEAR (CENTER)",
-    cls: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
-  };
+  // ── Steering recommendation ───────────────────────────────────────────────
+  let steerText = "PATH CLEAR";
+  let steerIcon: "steerUp" | "steerLeft" | "steerRight" = "steerUp";
+  let steerCls = "border-ok/30 bg-ok/10 text-ok";
   if (steeringGuidance < -0.1) {
-    const pct = Math.round(Math.abs(steeringGuidance) * 100);
-    steerBanner = {
-      text: `◄ STEER LEFT (${pct}%)`,
-      cls: "border-amber-500/40 bg-amber-500/20 text-amber-300 animate-pulse",
-    };
+    steerText = `STEER LEFT ${Math.round(Math.abs(steeringGuidance) * 100)}%`;
+    steerIcon = "steerLeft";
+    steerCls = "border-caution/40 bg-caution/15 text-caution";
   } else if (steeringGuidance > 0.1) {
-    const pct = Math.round(steeringGuidance * 100);
-    steerBanner = {
-      text: `STEER RIGHT ► (${pct}%)`,
-      cls: "border-amber-500/40 bg-amber-500/20 text-amber-300 animate-pulse",
-    };
+    steerText = `STEER RIGHT ${Math.round(steeringGuidance * 100)}%`;
+    steerIcon = "steerRight";
+    steerCls = "border-caution/40 bg-caution/15 text-caution";
   }
 
-  // Speed bar percentage (0 - 50 km/h)
   const speedPct = Math.min(100, Math.max(0, (speedKmh / 50) * 100));
 
-  return (
-    <aside className="relative z-20 flex h-full w-88 flex-shrink-0 flex-col justify-between gap-3 overflow-hidden border-r border-white/10 bg-zinc-950/95 p-3.5 select-none backdrop-blur-2xl">
-      {/* ========================================================================= */}
-      {/* CARD 1: DRIVER CLUSTER                                                    */}
-      {/* ========================================================================= */}
-      <div className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-gradient-to-b from-zinc-900/85 via-zinc-900/60 to-zinc-950/90 p-4 shadow-xl">
-        {/* Card Header */}
-        <div className="flex items-center justify-between border-b border-white/5 pb-2">
-          <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-amber-400 shadow-[0_0_6px_#f59e0b]" />
-            <span className="font-mono text-[10px] font-black uppercase tracking-wider text-zinc-400">
-              Driver Cluster
-            </span>
-          </div>
-          <span className="rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[9px] font-bold text-zinc-400">
-            CAT 797F
-          </span>
-        </div>
+  const ttcText =
+    !connected || speedKmh < 1 || ttcSeconds > 25 ? "--" : `${ttcSeconds.toFixed(1)}s`;
+  const ttcTone =
+    !connected || speedKmh < 1 || ttcSeconds > 25
+      ? "text-fg-3"
+      : ttcSeconds < 3
+        ? "text-danger"
+        : ttcSeconds < 6
+          ? "text-caution"
+          : "text-ok";
 
-        {/* Speedometer Readout */}
-        <div className="flex items-baseline justify-between pt-1">
-          <div className="flex items-baseline gap-2">
-            <span className="font-mono text-5xl font-black tracking-tight text-white drop-shadow-[0_2px_12px_rgba(255,255,255,0.15)]">
+  return (
+    <aside className="relative z-20 flex h-full w-[320px] flex-shrink-0 select-none flex-col gap-3 overflow-y-auto overscroll-contain border-r border-surface-4/50 bg-ink/95 p-3.5 backdrop-blur-md">
+      {/* ══ DRIVE ═══════════════════════════════════════════════════════════ */}
+      <Section
+        title="Drive"
+        right={<span className="pill border-brand/25 bg-brand/10 text-brand">CAT&nbsp;797F</span>}
+      >
+        {/* Speed readout */}
+        <div className="flex items-start justify-between">
+          <div className="flex h-12 items-baseline gap-2">
+            <span className="font-mono text-5xl font-bold leading-none tracking-tight text-fg tabular-nums">
               {speedKmh}
             </span>
-            <span className="font-mono text-xs font-bold tracking-wider text-zinc-400 uppercase">
-              KM/H
-            </span>
+            <span className="font-mono text-xs font-semibold uppercase text-fg-3">km/h</span>
           </div>
-
           <div className="flex flex-col items-end gap-1">
             <span
-              className={`rounded-full px-2 py-0.5 font-mono text-[9px] font-black uppercase tracking-wider border ${
+              className={`pill uppercase ${
                 boost
-                  ? "border-cyan-500/50 bg-cyan-500/20 text-cyan-300 shadow-[0_0_10px_rgba(6,182,212,0.4)]"
-                  : "border-white/10 bg-white/5 text-zinc-400"
+                  ? "border-info/40 bg-info/10 text-info"
+                  : "border-surface-4/60 bg-surface-1 text-fg-3"
               }`}
             >
-              {boost ? "⚡ BOOST" : "NORMAL"}
+              {boost && <Icon name="bolt" className="h-3 w-3" />}
+              {boost ? "Boost" : "Normal"}
             </span>
-            <span className="font-mono text-[9px] font-semibold text-zinc-400">
+            <span className="max-w-full truncate font-mono text-[10px] font-medium text-fg-3">
               MAX 50 KM/H
             </span>
           </div>
         </div>
 
-        {/* Linear Speed Gauge */}
+        {/* Linear speed gauge */}
         <div className="flex flex-col gap-1">
-          <div className="relative h-2 w-full overflow-hidden rounded-full border border-white/5 bg-white/5">
+          <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-surface-3">
             <div
               className={`h-full rounded-full transition-all duration-150 ${
-                boost
-                  ? "bg-gradient-to-r from-cyan-400 via-sky-400 to-indigo-500 shadow-[0_0_12px_rgba(6,182,212,0.8)]"
-                  : "bg-gradient-to-r from-amber-400 via-orange-400 to-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]"
+                boost ? "bg-info" : "bg-brand"
               }`}
               style={{ width: `${speedPct}%` }}
             />
           </div>
-          <div className="flex justify-between font-mono text-[8px] font-bold text-zinc-400">
-            <span>0</span>
-            <span>25</span>
-            <span>50</span>
-          </div>
         </div>
 
-        {/* Gear Selector */}
-        <div className="grid grid-cols-5 gap-1.5 pt-0.5">
-          {(["P", "R", "N", "D", "B"] as const).map((g) => {
-            const active = gear === g;
-            let activeStyle =
-              "border-amber-400/60 bg-amber-400/20 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.4)]";
-            if (g === "D") {
-              activeStyle =
-                "border-emerald-400/60 bg-emerald-400/20 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.4)]";
-            } else if (g === "B") {
-              activeStyle =
-                "border-cyan-400/60 bg-cyan-400/20 text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.4)]";
-            } else if (g === "R") {
-              activeStyle =
-                "border-rose-400/60 bg-rose-400/20 text-rose-300 shadow-[0_0_12px_rgba(244,63,94,0.4)]";
-            } else if (g === "P") {
-              activeStyle =
-                "border-zinc-400/60 bg-zinc-400/20 text-white shadow-sm";
-            }
-
-            return (
-              <div
-                key={g}
-                className={`flex h-8 items-center justify-center rounded-xl border font-mono text-[11px] font-black transition-all ${
-                  active
-                    ? activeStyle
-                    : "border-white/5 bg-white/[0.02] text-zinc-400"
-                }`}
-              >
-                {GEAR_LABELS[g]}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* 1-Line Attitude & Telemetry Strip */}
-        <div className="flex flex-col gap-1.5 rounded-xl border border-white/5 bg-white/[0.02] p-2.5">
-          <div className="flex items-center justify-between font-mono text-[10px] font-bold">
-            <div className="flex items-center gap-3 text-zinc-300">
-              <span>
-                P:{" "}
-                <strong className="text-amber-400">
-                  {pitch >= 0 ? "+" : ""}
-                  {pitch.toFixed(1)}°
-                </strong>
-              </span>
-              <span>
-                R:{" "}
-                <strong className="text-amber-400">
-                  {roll >= 0 ? "+" : ""}
-                  {roll.toFixed(1)}°
-                </strong>
-              </span>
-            </div>
-
-            <span
-              className={`rounded px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider ${
-                isRollover
-                  ? "bg-red-500/20 text-red-300 border border-red-500/40 animate-pulse"
-                  : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+        {/* Gear selector */}
+        <div className="grid grid-cols-5 gap-1.5">
+          {(["P", "R", "N", "D", "B"] as const).map((g) => (
+            <div
+              key={g}
+              className={`flex h-8 items-center justify-center rounded-lg border font-mono text-[11px] font-bold transition-colors ${
+                gear === g ? GEAR_ACTIVE_CLS[g] : "border-surface-4/40 bg-surface-1 text-fg-3"
               }`}
             >
-              {isRollover ? "⚠ ROLLOVER RISK" : "✔ STABLE"}
-            </span>
-          </div>
-
-          {/* Anomaly / E-Stop dynamic notification line */}
-          {(roadAnomaly || estopActive) && (
-            <div className="flex items-center gap-1.5 pt-0.5 font-mono text-[9px] font-bold">
-              {estopActive && (
-                <span className="flex items-center gap-1 rounded bg-rose-500/20 px-1.5 py-0.5 text-rose-300 border border-rose-500/40 animate-pulse">
-                  🛑 E-STOP ACTIVE
-                </span>
-              )}
-              {roadAnomaly && (
-                <span className="flex items-center gap-1 rounded bg-amber-500/20 px-1.5 py-0.5 text-amber-300 border border-amber-500/40 animate-pulse">
-                  ⚡ ROAD ANOMALY
-                </span>
-              )}
+              {GEAR_LABELS[g]}
             </div>
-          )}
+          ))}
         </div>
-      </div>
 
-      {/* ========================================================================= */}
-      {/* CARD 2: TINYML RADAR PERCEPTION                                           */}
-      {/* ========================================================================= */}
-      <div className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-gradient-to-b from-zinc-900/85 via-zinc-900/60 to-zinc-950/90 p-4 shadow-xl">
-        {/* Card Header */}
-        <div className="flex items-center justify-between border-b border-white/5 pb-2">
-          <div className="flex items-center gap-2">
-            <span
-              className={`h-2 w-2 rounded-full ${
-                connected
-                  ? "bg-emerald-400 shadow-[0_0_6px_#34d399] animate-pulse"
-                  : "bg-zinc-500"
-              }`}
-            />
-            <span className="font-mono text-[10px] font-black uppercase tracking-wider text-zinc-400">
-              TinyML Perception
-            </span>
+        {/* Alerts strip — only when active */}
+        {(estopActive || roadAnomaly) && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {estopActive && (
+              <span className="pill border-danger/50 bg-danger/15 text-danger animate-pulse">
+                <Icon name="alert" className="h-3 w-3" /> E-Stop Active
+              </span>
+            )}
+            {roadAnomaly && (
+              <span className="pill border-caution/50 bg-caution/15 text-caution">
+                <Icon name="bolt" className="h-3 w-3" /> Road Anomaly
+              </span>
+            )}
           </div>
+        )}
+      </Section>
 
+      {/* ══ TINYML PERCEPTION ══════════════════════════════════════════════ */}
+      <Section
+        title="TinyML Perception"
+        right={
           <span
-            className={`rounded-md border px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider ${
-              connected
-                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-                : "border-white/10 bg-white/5 text-zinc-400"
+            className={`pill uppercase ${
+              connected ? "border-ok/40 bg-ok/10 text-ok" : "border-surface-4/60 bg-surface-1 text-fg-3"
             }`}
           >
-            {connected ? "ACTIVE" : "OFFLINE"}
+            <StatusDot tone={connected ? "ok" : "muted"} />
+            {connected ? "Active" : "Offline"}
           </span>
-        </div>
-
-        {/* Clearance Metric */}
-        <div className="flex items-baseline justify-between">
+        }
+      >
+        {/* Clearance + TTC */}
+        <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-[9px] font-mono font-bold tracking-wider text-zinc-400 uppercase">
-              Obstacle Clearance
-            </div>
-            <div className="flex items-baseline gap-1.5 pt-0.5">
-              <span className={`font-mono text-4xl font-black ${distColor}`}>
+            <div className="kpi-label">Obstacle Clearance</div>
+            <div className="flex h-9 items-baseline gap-1.5 pt-1">
+              <span className={`font-mono text-3xl font-bold leading-none tabular-nums ${distTone}`}>
                 {isClear ? "> 80" : closestObstacleM.toFixed(1)}
               </span>
-              <span className="font-mono text-xs font-bold text-zinc-400 uppercase">
-                Meters
+              <span className="font-mono text-[10px] font-semibold uppercase text-fg-3">m</span>
+            </div>
+          </div>
+          <div className="flex flex-col items-end">
+            <div className="kpi-label">Time to Collision</div>
+            <div className="flex h-9 items-end pt-1">
+              <span className={`font-mono text-xl font-bold leading-none tabular-nums ${ttcTone}`}>
+                {ttcText}
               </span>
             </div>
           </div>
-
-          <div className="flex flex-col items-end gap-1">
-            <span className="text-[9px] font-mono font-bold tracking-wider text-zinc-400 uppercase">
-              Time to Collision
-            </span>
-            <span
-              className={`font-mono text-base font-black ${
-                !connected || speedKmh < 1 || ttcSeconds > 25
-                  ? "text-zinc-400"
-                  : ttcSeconds < 3
-                  ? "text-red-400 animate-pulse"
-                  : ttcSeconds < 6
-                  ? "text-amber-400"
-                  : "text-emerald-400"
-              }`}
-            >
-              {!connected || speedKmh < 1 || ttcSeconds > 25
-                ? "--"
-                : `${ttcSeconds.toFixed(1)}s`}
-            </span>
-          </div>
         </div>
 
-        {/* Proximity Track Bar (0m to 80m) */}
-        <div className="relative h-1.5 w-full overflow-hidden rounded-full border border-white/5 bg-white/5">
+        {/* Proximity track (0–80 m) */}
+        <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-surface-3">
           <div
             className={`h-full rounded-full transition-all duration-150 ${
-              closestObstacleM < 15
-                ? "bg-red-500 shadow-[0_0_8px_#ef4444]"
-                : closestObstacleM < 30
-                ? "bg-amber-400 shadow-[0_0_8px_#f59e0b]"
-                : "bg-emerald-400"
+              closestObstacleM < 15 ? "bg-danger" : closestObstacleM < 30 ? "bg-caution" : "bg-ok"
             }`}
             style={{
               width: `${Math.min(100, Math.max(0, (closestObstacleM / 80) * 100))}%`,
@@ -303,25 +236,42 @@ export function DashboardPanel() {
           />
         </div>
 
-        {/* Steering Path Guidance */}
-        <div className="flex flex-col gap-1.5 pt-0.5">
-          <div className="text-[9px] font-mono font-bold tracking-wider text-zinc-400 uppercase">
-            Trajectory Guidance
-          </div>
-          <div
-            className={`flex items-center justify-center rounded-xl border py-2 font-mono text-xs font-black tracking-wider uppercase transition-all ${steerBanner.cls}`}
-          >
-            {steerBanner.text}
-          </div>
+        <div className="flex items-center justify-between">
+          <span className="kpi-label">Risk Level</span>
+          <span className={`pill uppercase ${riskCls}`}>{riskLabel}</span>
         </div>
 
-        {/* Offline Notice if Python is not streaming */}
+        <div className="flex items-center justify-between">
+          <span className="kpi-label">Threat Direction</span>
+          <span
+            className={`pill uppercase ${
+              threatDirection === "FRONT"
+                ? "border-danger/50 bg-danger/15 text-danger"
+                : threatDirection === "REAR"
+                  ? "border-caution/50 bg-caution/15 text-caution"
+                  : "border-surface-4/60 bg-surface-1 text-fg-3"
+            }`}
+          >
+            {threatDirection === "NONE" ? "None" : threatDirection.toLowerCase()}
+          </span>
+        </div>
+
         {!connected && (
-          <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.01] p-2 text-center font-mono text-[9px] text-zinc-400">
+          <div className="rounded-lg border border-dashed border-surface-4/60 bg-surface-1/50 px-2 py-1.5 text-center font-mono text-[10px] leading-relaxed text-fg-3">
             Waiting for TinyML WebSocket (localhost:8765)...
           </div>
         )}
-      </div>
+      </Section>
+
+      {/* ══ TRAJECTORY GUIDANCE ═════════════════════════════════════════════ */}
+      <Section title="Trajectory Guidance">
+        <div
+          className={`flex items-center justify-center gap-2 rounded-lg border py-2.5 font-mono text-xs font-bold uppercase tracking-wider ${steerCls}`}
+        >
+          <Icon name={steerIcon} className="h-4 w-4" />
+          {steerText}
+        </div>
+      </Section>
     </aside>
   );
 }
