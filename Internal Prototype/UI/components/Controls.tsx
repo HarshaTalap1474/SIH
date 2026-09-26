@@ -20,13 +20,6 @@ import { rigParts } from "@/lib/rig";
 import { adasClient, useAdasStore } from "@/lib/mlClient";
 import { hwClient, useHardwareStore } from "@/lib/hardwareClient";
 
-const SPOIL_DUMPS = [
-  { x: -65, z: -110, r: 22 },
-  { x: 75, z: -120, r: 24 },
-  { x: -85, z: 115, r: 26 },
-  { x: 80, z: 125, r: 28 },
-] as const;
-
 /**
  * Analytical 3D mountain and solid barrier collision tester.
  * Evaluates whether world coordinate (px, pz) represents impassable mountain geometry.
@@ -45,19 +38,10 @@ function isMountainTerrain(px: number, pz: number, truckY: number | null): boole
     return true;
   }
 
-  // 3. Spoil dumps (conical waste rock mountains)
-  for (let i = 0; i < SPOIL_DUMPS.length; i++) {
-    const sd = SPOIL_DUMPS[i];
-    if (Math.hypot(px - sd.x, pz - sd.z) < sd.r) return true;
-  }
-
-  // 4. Central rocky mountain spur at (26, 8)
+  // 3. Central rocky mountain spur at (26, 8)
   if (Math.hypot(px - 26, pz - 8) < 15) return true;
 
-  // 5. Mine drainage silt pond at (-55, 35)
-  if (Math.hypot(px - (-55), pz - 35) < 11.5) return true;
-
-  // 6. Terrain elevation & highwall sampling
+  // 4. Terrain elevation & highwall sampling
   const py = getTerrainElevation(px, pz);
   const heightAboveRoad = py - center.y;
 

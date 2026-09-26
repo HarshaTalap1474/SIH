@@ -200,19 +200,12 @@ export const ROAD_BARRIERS: ReadonlyArray<BarrierBox> = [
 ];
 
 export const BLOCKERS: ReadonlyArray<readonly [number, number, number]> = [
-  // 1. Stockpiles & Pit Structures
-  ...STOCKPILES.map(([x, z, r]) => [x, z, r + 1] as const),
-  [55, -67, 6.5],
-  [48, -56, 5.5],
-  [52, -62, 12.5],
-  [-55, 35, 11.5],
-  [36, -62, 4.5],
-
-  // 2. Heavy mining machinery & crane (Excavator, Crane, Loader)
-  ...HEAVY_EQUIPMENT.map((e) => [e.x, e.z, e.radius] as const),
-
-  // 3. Designated rock obstacles
+  // 1. Designated rock obstacles
   ...ROCK_SPOTS.map(([x, z, s]) => [x, z, s * 1.5] as const),
+  // 2. High-mast floodlight towers
+  ...LIGHT_TOWERS.map((t) => [t.x, t.z, t.radius] as const),
+  // 3. Road signs along haul road
+  ...ROAD_SIGNS.map((s) => [s.x, s.z, s.radius] as const),
 ];
 
 export const DUMPER = {

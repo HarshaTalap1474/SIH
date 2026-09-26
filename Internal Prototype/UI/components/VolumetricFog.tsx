@@ -94,30 +94,5 @@ export function VolumetricFog() {
     }
   });
 
-  if (!mistTexture) return null;
-
-  return (
-    <group ref={groupRef}>
-      {MIST_SHEETS.map((sheet, i) => (
-        <mesh
-          key={i}
-          position={[sheet.x, sheet.y, sheet.z]}
-          rotation={[-Math.PI / 2, 0, i * 0.7]}
-          scale={[sheet.scale, sheet.scale, 1]}
-          renderOrder={1}
-        >
-          <planeGeometry args={[1, 1]} />
-          <meshBasicMaterial
-            map={mistTexture}
-            color="#38322e"
-            transparent
-            opacity={0.15}
-            depthWrite={false}
-            blending={THREE.NormalBlending}
-            side={THREE.DoubleSide}
-          />
-        </mesh>
-      ))}
-    </group>
-  );
+  return null;
 }

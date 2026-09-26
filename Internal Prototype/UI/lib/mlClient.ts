@@ -4,6 +4,9 @@ import { create } from "zustand";
 import {
   BLOCKERS,
   PHYSICS,
+  getTerrainElevation,
+  getRoadLateralOffset,
+  getRoadWidth,
 } from "./constants";
 
 export type CollisionRisk = "SAFE" | "CAUTION" | "CRITICAL";
@@ -86,7 +89,7 @@ export interface RayHit {
 
 
 
-// Map-Aware Raycast distance calculation against obstacles, barriers, and pit boundaries
+// Map-Aware Raycast distance calculation against obstacles, barriers, and mountain terrain
 function castRay(
   originX: number,
   originZ: number,
@@ -100,7 +103,7 @@ function castRay(
   let minClearance = 2.5;
   let minCategory: "big" | "small" = "big";
 
-  // 1. Check genuine obstacle bodies (stockpiles, boulders, machinery, poles, signs, rock clusters)
+  // 1. Check genuine obstacle bodies (boulders, machinery, poles, signs, rock clusters)
   for (let i = 0; i < BLOCKERS.length; i++) {
     const [bx, bz, br] = BLOCKERS[i];
     const clearance = 2.5;
@@ -127,9 +130,9 @@ function castRay(
     }
   }
 
-  // 2. Pit outer mountain rim check
+  // 2. Pit outer mountain perimeter boundary check (185m)
   const b = originX * dx + originZ * dz;
-  const c = originX * originX + originZ * originZ - PHYSICS.arenaRadius * PHYSICS.arenaRadius;
+  const c = originX * originX + originZ * originZ - 185 * 185;
   const disc = b * b - c;
   if (disc > 0) {
     const hitDist = -b + Math.sqrt(disc);
@@ -137,6 +140,64 @@ function castRay(
       minDist = hitDist;
       minClearance = 2.5;
       minCategory = "big";
+    }
+  }
+
+  // 3. 3D Mountain & steep solid terrain obstacle detection along the sensor ray
+  const step = 1.0;
+  const rayLimit = Math.min(maxDist, minDist);
+  const originY = getTerrainElevation(originX, originZ);
+
+  for (let s = 1.0; s < rayLimit; s += step) {
+    const px = originX + s * dx;
+    const pz = originZ + s * dz;
+
+    // Engineered haul road & immediate shoulder: drivable clear path
+    const { u, center } = getRoadLateralOffset(px, pz);
+    const halfW = getRoadWidth(pz) * 0.5;
+    if (Math.abs(u) <= halfW + 1.2) {
+      continue; // Point is on haul road
+    }
+
+    // Outer arena perimeter mountain wall (beyond 185m)
+    if (Math.hypot(px, pz) > 185) {
+      minDist = s;
+      minClearance = 2.5;
+      minCategory = "big";
+      break;
+    }
+
+    // Central rocky mountain spur at (26, 8)
+    if (Math.hypot(px - 26, pz - 8) < 15) {
+      minDist = s;
+      minClearance = 2.5;
+      minCategory = "big";
+      break;
+    }
+
+    // Mountain highwall rock face / steep terrain obstruction directly in path
+    const py = getTerrainElevation(px, pz);
+    const heightAboveRoad = py - center.y;
+    const heightAboveTruck = py - originY;
+
+    if (heightAboveRoad > 3.2 || heightAboveTruck > 1.35) {
+      minDist = s;
+      minClearance = 2.5;
+      minCategory = "big";
+      break;
+    }
+
+    // Steep mountain cliff face slope
+    const delta = 0.5;
+    const sx = (getTerrainElevation(px + delta, pz) - getTerrainElevation(px - delta, pz)) / (2 * delta);
+    const sz = (getTerrainElevation(px, pz + delta) - getTerrainElevation(px, pz - delta)) / (2 * delta);
+    const slope = Math.hypot(sx, sz);
+
+    if (slope > 0.40 && heightAboveTruck > 0.4) {
+      minDist = s;
+      minClearance = 2.5;
+      minCategory = "big";
+      break;
     }
   }
 

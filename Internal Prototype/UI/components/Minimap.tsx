@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useSim } from "@/lib/simStore";
 import {
-  STOCKPILES,
   ROCK_SPOTS,
   PHYSICS,
   ROAD_SIGNS,
@@ -17,17 +16,6 @@ import {
 
 const WIDTH = 224;
 const HEIGHT = 180;
-const EXTRA_STOCKPILES = [
-  [55, -67, 6],
-  [48, -56, 5],
-] as const;
-
-const SPOIL_DUMPS = [
-  { x: -65, z: -110, r: 22, name: "SPOIL 1" },
-  { x: 75, z: -120, r: 24, name: "SPOIL 2" },
-  { x: -85, z: 115, r: 26, name: "SPOIL 3" },
-  { x: 80, z: 125, r: 28, name: "SPOIL 4" },
-] as const;
 
 /**
  * Returns human-readable zone / road segment name corresponding to world coordinates.
@@ -47,11 +35,9 @@ function getRoadSegmentName(x: number, z: number): string {
     if (z < 145) return "HAUL ROAD • SOUTH SUMMIT (+12M)";
     return "HAUL ROAD • SOUTH PORTAL";
   } else {
-    if (Math.hypot(x - 52, z - (-62)) < 26) return "ZONE • CRUSHER PLATFORM";
-    if (Math.hypot(x - (-70), z - (-30)) < 28) return "ZONE • EXCAVATOR EX-01 BASIN";
-    if (Math.hypot(x - (-55), z - 35) < 22) return "ZONE • DRAINAGE SUMP";
-    if (u < 0) return "PIT BASIN • OFF-ROAD BENCH";
-    return "HIGHWALL FLANK • OFF-ROAD";
+    if (Math.hypot(x - 26, z - 8) < 18) return "ZONE • CENTRAL MOUNTAIN SPUR";
+    if (u < 0) return "MOUNTAIN FLANK • WEST SLOPE";
+    return "HIGHWALL FLANK • EAST RIDGE";
   }
 }
 
@@ -112,45 +98,6 @@ export function Minimap() {
       ctx.scale(scale, scale);
       ctx.translate(-truckX, -truckZ);
 
-      // A. Outer Pit Perimeter (185m drivable boundary)
-      ctx.beginPath();
-      ctx.arc(0, 0, 185, 0, Math.PI * 2);
-      ctx.strokeStyle = "rgba(120, 53, 15, 0.35)";
-      ctx.lineWidth = 2.5;
-      ctx.stroke();
-
-      // B. Terraced Open-Pit Bench Contours (Catch benches at depth)
-      ctx.strokeStyle = "rgba(87, 52, 34, 0.45)";
-      ctx.lineWidth = 1.2;
-      ctx.setLineDash([4, 6]);
-      for (const r of [125, 140, 156, 172]) {
-        ctx.beginPath();
-        ctx.arc(0, 0, r, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-      ctx.setLineDash([]);
-
-      // C. Spoil Dumps / Overburden Waste Rock Mountains
-      for (const sd of SPOIL_DUMPS) {
-        // Base cone
-        ctx.beginPath();
-        ctx.arc(sd.x, sd.z, sd.r, 0, Math.PI * 2);
-        ctx.fillStyle = "#2c170f";
-        ctx.fill();
-        ctx.strokeStyle = "#78350f";
-        ctx.lineWidth = 1.2;
-        ctx.stroke();
-
-        // Inner ridge contour
-        ctx.beginPath();
-        ctx.arc(sd.x, sd.z, sd.r * 0.55, 0, Math.PI * 2);
-        ctx.fillStyle = "#3e2015";
-        ctx.fill();
-        ctx.strokeStyle = "#92400e";
-        ctx.lineWidth = 0.8;
-        ctx.stroke();
-      }
-
       // D. Central Mountain Spur at (26, 8)
       ctx.beginPath();
       ctx.arc(26, 8, 15, 0, Math.PI * 2);
@@ -166,83 +113,6 @@ export function Minimap() {
       ctx.fillStyle = "#4a2619";
       ctx.fill();
       ctx.stroke();
-
-      // E. Canyon Cut Highwall Hazard Zones (Carved vertical mountain rock faces)
-      // Left highwall in canyon cut (z in [-115, -70])
-      ctx.beginPath();
-      for (let rz = -115; rz <= -70; rz += 4) {
-        const pt = getRoadEdgePoint(rz, -11.5);
-        if (rz === -115) ctx.moveTo(pt.x, pt.z);
-        else ctx.lineTo(pt.x, pt.z);
-      }
-      for (let rz = -70; rz >= -115; rz -= 4) {
-        const pt = getRoadEdgePoint(rz, -26.0);
-        ctx.lineTo(pt.x, pt.z);
-      }
-      ctx.closePath();
-      ctx.fillStyle = "rgba(120, 53, 15, 0.4)";
-      ctx.fill();
-
-      // Right highwall in canyon cut (z in [-115, -70])
-      ctx.beginPath();
-      for (let rz = -115; rz <= -70; rz += 4) {
-        const pt = getRoadEdgePoint(rz, 11.5);
-        if (rz === -115) ctx.moveTo(pt.x, pt.z);
-        else ctx.lineTo(pt.x, pt.z);
-      }
-      for (let rz = -70; rz >= -115; rz -= 4) {
-        const pt = getRoadEdgePoint(rz, 26.0);
-        ctx.lineTo(pt.x, pt.z);
-      }
-      ctx.closePath();
-      ctx.fillStyle = "rgba(120, 53, 15, 0.4)";
-      ctx.fill();
-
-      // Highwall along East mountain flank (z in [-50, 40])
-      ctx.beginPath();
-      for (let rz = -50; rz <= 40; rz += 5) {
-        const pt = getRoadEdgePoint(rz, 11.5);
-        if (rz === -50) ctx.moveTo(pt.x, pt.z);
-        else ctx.lineTo(pt.x, pt.z);
-      }
-      for (let rz = 40; rz >= -50; rz -= 5) {
-        const pt = getRoadEdgePoint(rz, 28.0);
-        ctx.lineTo(pt.x, pt.z);
-      }
-      ctx.closePath();
-      ctx.fillStyle = "rgba(120, 53, 15, 0.35)";
-      ctx.fill();
-
-      // F. Silt Drainage Pond at (-55, 35) (Restricted Water Hazard)
-      ctx.beginPath();
-      ctx.arc(-55, 35, 11.5, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(15, 118, 110, 0.75)";
-      ctx.fill();
-      ctx.strokeStyle = "#14b8a6";
-      ctx.lineWidth = 1.2;
-      ctx.stroke();
-
-      // Inner ripple ring
-      ctx.beginPath();
-      ctx.arc(-55, 35, 6, 0, Math.PI * 2);
-      ctx.strokeStyle = "rgba(94, 234, 212, 0.5)";
-      ctx.lineWidth = 0.8;
-      ctx.stroke();
-
-      // G. Primary Crusher Platform & Loading Ramp at (52, -62)
-      ctx.beginPath();
-      ctx.arc(52, -62, 13, 0, Math.PI * 2);
-      ctx.fillStyle = "#3e281b";
-      ctx.fill();
-      ctx.strokeStyle = "#b45309";
-      ctx.lineWidth = 1.4;
-      ctx.stroke();
-
-      // Crusher loading ramp (accessible from road opening at z=[-72, -52])
-      ctx.fillStyle = "#2c1c13";
-      ctx.fillRect(28, -66.5, 16, 9);
-      ctx.strokeStyle = "#78350f";
-      ctx.strokeRect(28, -66.5, 16, 9);
 
       // H. Synchronized True 3D Haul Road Network (18m wide, tapering in passes)
       // 1. Road bed base
@@ -338,30 +208,51 @@ export function Minimap() {
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // I. Stockpiles (Iron ore mounds)
-      ctx.fillStyle = "#9a3412";
-      ctx.strokeStyle = "#c2410c";
-      ctx.lineWidth = 0.9;
-      for (const [sx, sz, sr] of STOCKPILES) {
-        ctx.beginPath();
-        ctx.arc(sx, sz, sr, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
+      // E. Canyon Cut Highwall Hazard Zones (Carved vertical mountain rock faces)
+      // Left highwall in canyon cut (z in [-115, -70])
+      ctx.beginPath();
+      for (let rz = -115; rz <= -70; rz += 4) {
+        const pt = getRoadEdgePoint(rz, -11.5);
+        if (rz === -115) ctx.moveTo(pt.x, pt.z);
+        else ctx.lineTo(pt.x, pt.z);
       }
-      for (const [sx, sz, sr] of EXTRA_STOCKPILES) {
-        ctx.beginPath();
-        ctx.arc(sx, sz, sr, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
+      for (let rz = -70; rz >= -115; rz -= 4) {
+        const pt = getRoadEdgePoint(rz, -26.0);
+        ctx.lineTo(pt.x, pt.z);
       }
+      ctx.closePath();
+      ctx.fillStyle = "rgba(120, 53, 15, 0.4)";
+      ctx.fill();
 
-      // J. Heavy Mining Machinery
-      // Loader at (47, -62)
-      ctx.fillStyle = "#d97706";
-      ctx.fillRect(45, -64, 4, 4);
-      // Excavator at (-70, -30)
-      ctx.fillStyle = "#ea580c";
-      ctx.fillRect(-72, -32, 4.5, 4.5);
+      // Right highwall in canyon cut (z in [-115, -70])
+      ctx.beginPath();
+      for (let rz = -115; rz <= -70; rz += 4) {
+        const pt = getRoadEdgePoint(rz, 11.5);
+        if (rz === -115) ctx.moveTo(pt.x, pt.z);
+        else ctx.lineTo(pt.x, pt.z);
+      }
+      for (let rz = -70; rz >= -115; rz -= 4) {
+        const pt = getRoadEdgePoint(rz, 26.0);
+        ctx.lineTo(pt.x, pt.z);
+      }
+      ctx.closePath();
+      ctx.fillStyle = "rgba(120, 53, 15, 0.4)";
+      ctx.fill();
+
+      // Highwall along East mountain flank (z in [-50, 40])
+      ctx.beginPath();
+      for (let rz = -50; rz <= 40; rz += 5) {
+        const pt = getRoadEdgePoint(rz, 11.5);
+        if (rz === -50) ctx.moveTo(pt.x, pt.z);
+        else ctx.lineTo(pt.x, pt.z);
+      }
+      for (let rz = 40; rz >= -50; rz -= 5) {
+        const pt = getRoadEdgePoint(rz, 28.0);
+        ctx.lineTo(pt.x, pt.z);
+      }
+      ctx.closePath();
+      ctx.fillStyle = "rgba(120, 53, 15, 0.35)";
+      ctx.fill();
 
       // K. Major Boulders & Rock Obstacles
       ctx.fillStyle = "#71717a";

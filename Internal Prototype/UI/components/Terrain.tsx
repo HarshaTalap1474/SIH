@@ -4,13 +4,10 @@ import { useMemo } from "react";
 import * as THREE from "three";
 import {
   GRAVEL_CLUSTERS,
-  HEAVY_EQUIPMENT,
   LIGHT_TOWERS,
-  PATCHES,
   ROAD_SIGNS,
   ROCK_SPOTS,
   SCENE,
-  STOCKPILES,
   UTILITY_POLES,
   getHaulRoadCenterlineY,
   getRoadCenterline,
@@ -252,106 +249,7 @@ function UtilityPole({ x, y = 0, z, rot = 0 }: { x: number; y?: number; z: numbe
   );
 }
 
-// Construction Loader
-function Loader({ x, y = 0, z, rot }: { x: number; y?: number; z: number; rot: number }) {
-  return (
-    <group position={[x, y, z]} rotation={[0, rot, 0]}>
-      <mesh position={[-0.2, 1.25, 0.2]} castShadow receiveShadow>
-        <boxGeometry args={[3.2, 1.6, 4.8]} />
-        <meshStandardMaterial color="#d97706" roughness={0.5} metalness={0.2} />
-      </mesh>
-      <mesh position={[0, 2.45, -1.1]} castShadow>
-        <boxGeometry args={[2.3, 1.3, 1.6]} />
-        <meshStandardMaterial color="#b45309" roughness={0.5} />
-      </mesh>
-      <mesh position={[0, 2.5, -1.91]}>
-        <boxGeometry args={[2.0, 0.9, 0.1]} />
-        <meshStandardMaterial color="#0f172a" roughness={0.2} metalness={0.8} />
-      </mesh>
-      <mesh position={[0, 1.8, 2.2]} rotation={[-0.3, 0, 0]} castShadow>
-        <boxGeometry args={[2.2, 0.4, 3.2]} />
-        <meshStandardMaterial color="#78350f" roughness={0.6} />
-      </mesh>
-      <mesh position={[0, 1.1, 3.6]} rotation={[0.1, 0, 0]} castShadow receiveShadow>
-        <boxGeometry args={[3.4, 1.4, 1.8]} />
-        <meshStandardMaterial color="#292524" roughness={0.85} metalness={0.4} />
-      </mesh>
-      {[1.65, -1.65].map((wx) =>
-        [1.8, -1.8].map((wz, idx) => (
-          <mesh key={`${wx}-${idx}`} position={[wx, 1.0, wz]} rotation={[0, 0, Math.PI / 2]} castShadow>
-            <cylinderGeometry args={[1.0, 1.0, 0.85, 20]} />
-            <meshStandardMaterial color="#0c0a09" roughness={0.95} />
-          </mesh>
-        ))
-      )}
-    </group>
-  );
-}
 
-// Construction Excavator
-function Excavator({ x, y = 0, z, rot }: { x: number; y?: number; z: number; rot: number }) {
-  return (
-    <group position={[x, y, z]} rotation={[0, rot, 0]}>
-      <mesh position={[-1.8, 0.65, 0.4]} castShadow receiveShadow>
-        <boxGeometry args={[1.1, 1.2, 4.8]} />
-        <meshStandardMaterial color="#1c1917" roughness={0.95} />
-      </mesh>
-      <mesh position={[1.8, 0.65, 0.4]} castShadow receiveShadow>
-        <boxGeometry args={[1.1, 1.2, 4.8]} />
-        <meshStandardMaterial color="#1c1917" roughness={0.95} />
-      </mesh>
-      <mesh position={[0, 0.9, 0.4]} castShadow>
-        <boxGeometry args={[2.6, 0.6, 3.8]} />
-        <meshStandardMaterial color="#292524" roughness={0.9} />
-      </mesh>
-      <mesh position={[0, 2.1, 0.3]} castShadow>
-        <boxGeometry args={[3.8, 1.8, 4.0]} />
-        <meshStandardMaterial color="#d97706" roughness={0.5} metalness={0.2} />
-      </mesh>
-      <mesh position={[0, 2.2, -1.8]} castShadow>
-        <boxGeometry args={[3.6, 1.6, 1.2]} />
-        <meshStandardMaterial color="#78350f" roughness={0.7} />
-      </mesh>
-      <mesh position={[1.4, 2.9, 1.1]} castShadow>
-        <boxGeometry args={[1.4, 1.5, 1.8]} />
-        <meshStandardMaterial color="#b45309" roughness={0.5} />
-      </mesh>
-      <mesh position={[1.4, 3.0, 2.01]}>
-        <boxGeometry args={[1.2, 1.1, 0.05]} />
-        <meshStandardMaterial color="#0f172a" roughness={0.2} metalness={0.8} />
-      </mesh>
-      <mesh position={[-0.8, 3.8, 2.4]} rotation={[0.45, 0, 0]} castShadow>
-        <boxGeometry args={[0.7, 0.8, 6.2]} />
-        <meshStandardMaterial color="#92400e" roughness={0.6} />
-      </mesh>
-      <mesh position={[-0.8, 4.5, 5.8]} rotation={[-0.8, 0, 0]} castShadow>
-        <boxGeometry args={[0.6, 0.7, 4.4]} />
-        <meshStandardMaterial color="#92400e" roughness={0.6} />
-      </mesh>
-      <mesh position={[-0.8, 2.3, 6.8]} rotation={[-0.3, 0, 0]} castShadow receiveShadow>
-        <boxGeometry args={[1.8, 1.5, 1.8]} />
-        <meshStandardMaterial color="#1c1917" roughness={0.85} metalness={0.4} />
-      </mesh>
-    </group>
-  );
-}
-
-function Mound({ x, y = 0, z, r, h, isHighGrade = false }: { x: number; y?: number; z: number; r: number; h: number; isHighGrade?: boolean }) {
-  return (
-    <group position={[x, y, z]}>
-      {/* Subterranean extended cone ensures zero floating gaps on uneven slopes */}
-      <mesh position={[0, (h + 0.8) * 0.5 - 0.4, 0]} castShadow receiveShadow>
-        <coneGeometry args={[r, h + 0.8, 28, 2]} />
-        <meshStandardMaterial
-          color={isHighGrade ? SCENE.rockHighGrade : SCENE.moundColor}
-          roughness={0.98}
-          metalness={isHighGrade ? 0.25 : 0.05}
-          flatShading
-        />
-      </mesh>
-    </group>
-  );
-}
 
 function Rock({ x, y = 0, z, s, i }: { x: number; y?: number; z: number; s: number; i: number }) {
   const isHighGrade = i % 3 === 0;
@@ -370,20 +268,7 @@ function Rock({ x, y = 0, z, s, i }: { x: number; y?: number; z: number; s: numb
   );
 }
 
-function Patch({ x, y = 0, z, sx, sz }: { x: number; y?: number; z: number; sx: number; sz: number }) {
-  return (
-    <mesh position={[x, y + 0.02, z]} scale={[sx, 1, sz]} receiveShadow rotation={[-Math.PI / 2, 0, 0]}>
-      <circleGeometry args={[1, 24]} />
-      <meshStandardMaterial
-        color={SCENE.patchColor}
-        roughness={1}
-        polygonOffset
-        polygonOffsetFactor={-1}
-        polygonOffsetUnits={-1}
-      />
-    </mesh>
-  );
-}
+
 
 // Scattered Roadside Gravel Clusters & Micro-boulders along curved road
 function RoadsideGravelClusters() {
@@ -668,36 +553,7 @@ function useConformingPitFloorGeometry() {
   }, []);
 }
 
-// Spoil / Waste Rock Dumps (Anchored subterranean into terrain)
-function SpoilDump({
-  x,
-  z,
-  r,
-  h,
-  rot = 0,
-}: {
-  x: number;
-  z: number;
-  r: number;
-  h: number;
-  rot?: number;
-}) {
-  const y = getTerrainElevation(x, z);
-  return (
-    <group position={[x, y - 0.5, z]} rotation={[0, rot, 0]}>
-      <mesh position={[0, (h + 1.0) * 0.35, 0]} castShadow receiveShadow>
-        <cylinderGeometry args={[r * 0.65, r, (h + 1.0) * 0.7, 24]} />
-        <meshStandardMaterial color="#42251a" roughness={0.96} flatShading />
-      </mesh>
-      <mesh position={[0, (h + 1.0) * 0.78, 0]} castShadow receiveShadow>
-        <cylinderGeometry args={[r * 0.35, r * 0.62, (h + 1.0) * 0.44, 20]} />
-        <meshStandardMaterial color="#542c1e" roughness={0.94} flatShading />
-      </mesh>
-    </group>
-  );
-}
 
-const RAMP_TILT = Math.atan(5 / 16);
 
 const ROAD_RAIN_STYLES = {
   high: { roadColor: "#181412", roadRough: 0.28, roadMetal: 0.42, rutColor: "#120e0b", rutRough: 0.16, rutMetal: 0.55 },
@@ -764,16 +620,10 @@ export function Terrain() {
         <meshStandardMaterial color="#422417" roughness={0.96} side={THREE.DoubleSide} />
       </mesh>
 
-      {/* 7. Overburden Spoil Dumps & Waste Rock Piles */}
-      <SpoilDump x={-65} z={-110} r={22} h={14} rot={0.4} />
-      <SpoilDump x={75} z={-120} r={24} h={15} rot={-0.6} />
-      <SpoilDump x={-85} z={115} r={26} h={16} rot={0.8} />
-      <SpoilDump x={80} z={125} r={28} h={17} rot={-0.3} />
-
-      {/* 8. Roadside Gravel Clusters & Micro-Boulders */}
+      {/* 7. Roadside Gravel Clusters & Micro-Boulders */}
       <RoadsideGravelClusters />
 
-      {/* 9. Industrial High-Mast Floodlight Towers Illuminating Work Areas */}
+      {/* 8. Industrial High-Mast Floodlight Towers Illuminating Work Areas */}
       {LIGHT_TOWERS.map((t, i) => {
         const pt = getRoadEdgePoint(t.z, t.x < 0 ? -18.5 : 18.5);
         return (
@@ -781,52 +631,12 @@ export function Terrain() {
         );
       })}
 
-      {/* 10. Heavy Industrial Power Utility Poles along quarry perimeter */}
+      {/* 9. Heavy Industrial Power Utility Poles along quarry perimeter */}
       {UTILITY_POLES.map((p, i) => (
         <UtilityPole key={`pole-${i}`} x={p.x} y={getTerrainElevation(p.x, p.z)} z={p.z} rot={p.rot} />
       ))}
 
-      {/* 11. Mine Drainage Sump / Silt Pond (grounded at terrain elevation) */}
-      <group position={[-55, getTerrainElevation(-55, 35), 35]}>
-        <mesh position={[0, 0.03, 0]} receiveShadow>
-          <cylinderGeometry args={[11, 9, 0.3, 32]} />
-          <meshStandardMaterial color={SCENE.pondColor} roughness={0.3} metalness={0.7} />
-        </mesh>
-        <mesh position={[0, 0.18, 0]} rotation={[-Math.PI / 2, 0, 0]} castShadow receiveShadow>
-          <torusGeometry args={[11.2, 0.6, 8, 32]} />
-          <meshStandardMaterial color={SCENE.rockColor} roughness={0.95} />
-        </mesh>
-      </group>
-
-      {/* 12. Elevated Primary Crusher / Dump Platform */}
-      <group position={[52, getTerrainElevation(52, -62), -62]}>
-        <mesh position={[0, 2.5, 0]} castShadow receiveShadow>
-          <cylinderGeometry args={[13, 14, 5, 32]} />
-          <meshStandardMaterial color={SCENE.plateColor} roughness={0.95} />
-        </mesh>
-      </group>
-      {/* Loading Ramp to platform */}
-      <group position={[36, getTerrainElevation(36, -62) + 0.7, -62]} rotation={[0, 0, RAMP_TILT]}>
-        <mesh castShadow receiveShadow>
-          <boxGeometry args={[16, 1.2, 9]} />
-          <meshStandardMaterial color={SCENE.roadColor} roughness={0.92} />
-        </mesh>
-      </group>
-
-      {/* 13. Heavy Quarry Machinery (anchored to ground) */}
-      <Loader x={47} y={getTerrainElevation(47, -62)} z={-62} rot={-Math.PI / 2 + 0.5} />
-      <Excavator x={-70} y={getTerrainElevation(-70, -30)} z={-30} rot={0.8} />
-
-      {/* 14. High-Grade Iron Ore Stockpiles & Blast Piles */}
-      <Mound x={55} y={getTerrainElevation(55, -67)} z={-67} r={6} h={3.8} isHighGrade />
-      <Mound x={48} y={getTerrainElevation(48, -56)} z={-56} r={5} h={3.2} isHighGrade />
-
-      {/* Major Open-Pit Stockpiles */}
-      {STOCKPILES.map(([x, z, r, h], i) => (
-        <Mound key={`s${i}`} x={x} y={getTerrainElevation(x, z)} z={z} r={r} h={h} isHighGrade={i % 2 === 0} />
-      ))}
-
-      {/* Large Iron Ore Boulders & Rocks */}
+      {/* 10. Large Iron Ore Boulders & Rocks */}
       {ROCK_SPOTS.map(([x, z, s], i) => (
         <Rock key={`r${i}`} x={x} y={getTerrainElevation(x, z)} z={z} s={s} i={i} />
       ))}
