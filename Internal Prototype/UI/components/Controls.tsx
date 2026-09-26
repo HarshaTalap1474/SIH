@@ -2,13 +2,131 @@
 
 import { useEffect, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
-import { BLOCKERS, DUMPER, PHYSICS, clamp, damp, getRoadElevation, getRoadOrientation } from "@/lib/constants";
+import {
+  BLOCKERS,
+  DUMPER,
+  PHYSICS,
+  clamp,
+  damp,
+  getRoadElevation,
+  getRoadLateralOffset,
+  getRoadWidth,
+  getTerrainElevation,
+} from "@/lib/constants";
 import { isKeyDown } from "@/lib/keys";
 import { useSensor } from "@/lib/virtualSensor";
 import { useSim, GearMode } from "@/lib/simStore";
 import { rigParts } from "@/lib/rig";
 import { adasClient, useAdasStore } from "@/lib/mlClient";
 import { hwClient, useHardwareStore } from "@/lib/hardwareClient";
+
+const SPOIL_DUMPS = [
+  { x: -65, z: -110, r: 22 },
+  { x: 75, z: -120, r: 24 },
+  { x: -85, z: 115, r: 26 },
+  { x: 80, z: 125, r: 28 },
+] as const;
+
+/**
+ * Analytical 3D mountain and solid barrier collision tester.
+ * Evaluates whether world coordinate (px, pz) represents impassable mountain geometry.
+ */
+function isMountainTerrain(px: number, pz: number, truckY: number | null): boolean {
+  // 1. Engineered haul road & immediate shoulder exemption: road is always drivable
+  const { u, center } = getRoadLateralOffset(px, pz);
+  const halfW = getRoadWidth(pz) * 0.5;
+  const absU = Math.abs(u);
+  if (absU <= halfW + 1.2) {
+    return false;
+  }
+
+  // 2. Arena perimeter mountain ridge boundary (beyond 185m)
+  if (Math.hypot(px, pz) > 185) {
+    return true;
+  }
+
+  // 3. Spoil dumps (conical waste rock mountains)
+  for (let i = 0; i < SPOIL_DUMPS.length; i++) {
+    const sd = SPOIL_DUMPS[i];
+    if (Math.hypot(px - sd.x, pz - sd.z) < sd.r) return true;
+  }
+
+  // 4. Central rocky mountain spur at (26, 8)
+  if (Math.hypot(px - 26, pz - 8) < 15) return true;
+
+  // 5. Mine drainage silt pond at (-55, 35)
+  if (Math.hypot(px - (-55), pz - 35) < 11.5) return true;
+
+  // 6. Terrain elevation & highwall sampling
+  const py = getTerrainElevation(px, pz);
+  const heightAboveRoad = py - center.y;
+
+  // Highwall rock faces & mountain massifs rising above road/bench level
+  if (heightAboveRoad > 3.2) {
+    return true;
+  }
+
+  // Slope and step height calculation
+  const delta = 0.5;
+  const sx = (getTerrainElevation(px + delta, pz) - getTerrainElevation(px - delta, pz)) / (2 * delta);
+  const sz = (getTerrainElevation(px, pz + delta) - getTerrainElevation(px, pz - delta)) / (2 * delta);
+  const slope = Math.hypot(sx, sz);
+
+  // Impassable steep cliff / highwall rock face
+  if (truckY !== null) {
+    const hAboveTruck = py - truckY;
+    if (hAboveTruck > 1.35) {
+      return true; // Attempting to climb a steep mountain wall
+    }
+    if (slope > 0.40 && hAboveTruck > 0.35) {
+      return true; // Steep uphill rock face
+    }
+  } else {
+    if (slope > 0.42 && heightAboveRoad > 0.8) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Multi-point vehicle footprint collision check against 3D mountain geometry.
+ * Tests front bumper, rear bumper, left and right sides of the HEMM.
+ */
+function checkTruckTerrainCollision(tx: number, tz: number, tyaw: number): {
+  collided: boolean;
+  hitX: number;
+  hitZ: number;
+} {
+  const truckY = getTerrainElevation(tx, tz);
+  const fx = -Math.sin(tyaw);
+  const fz = -Math.cos(tyaw);
+  const rx = Math.cos(tyaw);
+  const rz = -Math.sin(tyaw);
+
+  // 9 probe points covering the HEMM boundary: center, front-center, front-L, front-R, mid-L, mid-R, rear-center, rear-L, rear-R
+  const probes: Array<[number, number]> = [
+    [0, 0],
+    [fx * 4.0, fz * 4.0],
+    [fx * 4.0 - rx * 2.3, fz * 4.0 - rz * 2.3],
+    [fx * 4.0 + rx * 2.3, fz * 4.0 + rz * 2.3],
+    [-rx * 2.3, -rz * 2.3],
+    [rx * 2.3, rz * 2.3],
+    [-fx * 3.6, -fz * 3.6],
+    [-fx * 3.6 - rx * 2.3, -fz * 3.6 - rz * 2.3],
+    [-fx * 3.6 + rx * 2.3, -fz * 3.6 + rz * 2.3],
+  ];
+
+  for (let i = 0; i < probes.length; i++) {
+    const px = tx + probes[i][0];
+    const pz = tz + probes[i][1];
+    if (isMountainTerrain(px, pz, truckY)) {
+      return { collided: true, hitX: px, hitZ: pz };
+    }
+  }
+  return { collided: false, hitX: 0, hitZ: 0 };
+}
 
 export function Controls() {
   const prevSpeed = useRef(0);
@@ -159,8 +277,8 @@ export function Controls() {
     const travelX = travelDir * fwdX;
     const travelZ = travelDir * fwdZ;
     const sampleDist = 2.0;
-    const roadYCurrent = getRoadElevation(x, z);
-    const roadYAhead = getRoadElevation(x + travelX * sampleDist, z + travelZ * sampleDist);
+    const roadYCurrent = getTerrainElevation(x, z);
+    const roadYAhead = getTerrainElevation(x + travelX * sampleDist, z + travelZ * sampleDist);
     const rawSlope = (roadYAhead - roadYCurrent) / sampleDist; // positive = climbing uphill
 
     // Uphill resistance applies strictly when travelling uphill (slope > 0)
@@ -274,12 +392,67 @@ export function Controls() {
 
     const speedFactor = clamp(Math.abs(speed) / PHYSICS.normalMaxSpeed, 0, 1);
     const dir = speed >= 0 ? 1 : -1;
-    yaw += steer * PHYSICS.yawRate * speedFactor * dir * dt;
+    const yawDelta = steer * PHYSICS.yawRate * speedFactor * dir * dt;
+    const nextYaw = yaw + yawDelta;
 
-    const fx = -Math.sin(yaw);
-    const fz = -Math.cos(yaw);
-    x += fx * speed * dt;
-    z += fz * speed * dt;
+    const fx = -Math.sin(nextYaw);
+    const fz = -Math.cos(nextYaw);
+    const moveX = fx * speed * dt;
+    const moveZ = fz * speed * dt;
+
+    // Movement resolution with 3D mountain boundary collision & sliding
+    const targetX = x + moveX;
+    const targetZ = z + moveZ;
+    const colFull = checkTruckTerrainCollision(targetX, targetZ, nextYaw);
+
+    if (!colFull.collided) {
+      x = targetX;
+      z = targetZ;
+      yaw = nextYaw;
+    } else {
+      // Mountain collision detected: resolve by sliding along boundary
+      const colX = checkTruckTerrainCollision(targetX, z, nextYaw);
+      const colZ = checkTruckTerrainCollision(x, targetZ, nextYaw);
+
+      if (!colX.collided && Math.abs(moveX) > 1e-4) {
+        x = targetX;
+        yaw = nextYaw;
+        speed *= 0.85;
+      } else if (!colZ.collided && Math.abs(moveZ) > 1e-4) {
+        z = targetZ;
+        yaw = nextYaw;
+        speed *= 0.85;
+      } else {
+        const hitDx = x - colFull.hitX;
+        const hitDz = z - colFull.hitZ;
+        const hitDist = Math.hypot(hitDx, hitDz);
+        let slid = false;
+        if (hitDist > 1e-4) {
+          const nx = hitDx / hitDist;
+          const nz = hitDz / hitDist;
+          const into = moveX * nx + moveZ * nz;
+          if (into < 0) {
+            const slideX = moveX - into * nx;
+            const slideZ = moveZ - into * nz;
+            const colSlide = checkTruckTerrainCollision(x + slideX, z + slideZ, nextYaw);
+            if (!colSlide.collided) {
+              x += slideX;
+              z += slideZ;
+              yaw = nextYaw;
+              speed *= 0.8;
+              slid = true;
+            }
+          }
+        }
+        if (!slid) {
+          const colYaw = checkTruckTerrainCollision(x, z, nextYaw);
+          if (!colYaw.collided) {
+            yaw = nextYaw;
+          }
+          speed = 0;
+        }
+      }
+    }
 
     const limit = PHYSICS.arenaRadius;
     const dist = Math.hypot(x, z);
@@ -301,11 +474,12 @@ export function Controls() {
         const nz = dz / d;
         x = bx + nx * min;
         z = bz + nz * min;
-        const into = fx * nx + fz * nz;
+        const curFx = -Math.sin(yaw);
+        const curFz = -Math.cos(yaw);
+        const into = curFx * nx + curFz * nz;
         if (into > 0) speed *= 1 - into * 0.85;
       }
     }
-
 
     // Stable transmission gear determination
     const gear: GearMode = boost
@@ -321,11 +495,24 @@ export function Controls() {
     // Call setFrame to update speedKmh, gear, and state synchronously
     useSim.getState().setFrame({ x, z, yaw, speed, steer, boost, gear });
 
-    const roadY = getRoadElevation(x, z);
-    const { pitch: roadPitch, roll: roadRoll } = getRoadOrientation(x, z);
+    const terrainY = getTerrainElevation(x, z);
+
+    // Natural 3D terrain pitch and roll under vehicle wheelbase & track width
+    const curFx = -Math.sin(yaw);
+    const curFz = -Math.cos(yaw);
+    const curRx = Math.cos(yaw);
+    const curRz = -Math.sin(yaw);
+
+    const yFront = getTerrainElevation(x + curFx * 2.2, z + curFz * 2.2);
+    const yRear = getTerrainElevation(x - curFx * 2.2, z - curFz * 2.2);
+    const yRight = getTerrainElevation(x + curRx * 1.8, z + curRz * 1.8);
+    const yLeft = getTerrainElevation(x - curRx * 1.8, z - curRz * 1.8);
+
+    const terrainPitch = Math.atan2(yFront - yRear, 4.4);
+    const terrainRoll = -Math.atan2(yRight - yLeft, 3.6);
 
     if (rigParts.rig) {
-      rigParts.rig.position.set(x, roadY, z);
+      rigParts.rig.position.set(x, terrainY, z);
       rigParts.rig.rotation.y = yaw;
     }
 
@@ -352,8 +539,8 @@ export function Controls() {
     joltVis.current = damp(joltVis.current, impact, 14, dt);
 
     if (rigParts.body) {
-      rigParts.body.rotation.x = pitchVis.current + roadPitch;
-      rigParts.body.rotation.z = rollVis.current + roadRoll;
+      rigParts.body.rotation.x = pitchVis.current + terrainPitch;
+      rigParts.body.rotation.z = rollVis.current + terrainRoll;
       const clock = state.clock.getElapsedTime();
       const jolt =
         joltVis.current * 0.28 * Math.sin(clock * 16) + joltVis.current * 0.18;

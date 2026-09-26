@@ -3,7 +3,7 @@
 import { useRef } from "react";
 import * as THREE from "three";
 import { useFrame } from "@react-three/fiber";
-import { CAMERA, SCENE, SENSOR, angleDeltaDeg, clamp, damp, getRoadElevation } from "@/lib/constants";
+import { CAMERA, SCENE, SENSOR, angleDeltaDeg, clamp, damp, getTerrainElevation } from "@/lib/constants";
 import { useSim } from "@/lib/simStore";
 import { useSensor } from "@/lib/virtualSensor";
 
@@ -64,7 +64,7 @@ export function CameraRig() {
     const rightZ = -Math.sin(sim.yaw);
 
     const clock = performance.now() / 1000;
-    const truckY = getRoadElevation(sim.x, sim.z);
+    const truckY = getTerrainElevation(sim.x, sim.z);
 
     if (sim.camMode === "top") {
       tx = sim.x - fwdX * CAMERA.topOffsetZ;
