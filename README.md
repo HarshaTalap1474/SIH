@@ -6,6 +6,16 @@ A Next.js-powered operational command center for monitoring a fleet of mining du
 
 ---
 
+## 📌 Repository Notes
+
+- This dashboard lives on the **`fleet_dash`** branch of `HarshaTalap1474/SIH`.
+- The live 3D simulation is hosted **separately** and linked into the dashboard via the
+  `NEXT_PUBLIC_CABIN_URL` environment variable (see "Deployment"). The dashboard's
+  "Live Cabin" preview/route opens that simulation.
+- Local dev simulation default: `http://localhost:3001`.
+
+---
+
 ## ✨ Features
 
 ### 🗺️ Live Mine Fleet Map
