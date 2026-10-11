@@ -1,7 +1,6 @@
 # Smart India Hackathon (SIH)
 
 Repository for Smart India Hackathon Project.
-
 ## Branch Workflow
 - **`main`**: Production / release branch (stable, tested releases only)
 - **`staging`**: Pre-production integration & verification branch
