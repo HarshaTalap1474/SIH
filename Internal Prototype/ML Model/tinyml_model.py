@@ -162,8 +162,8 @@ class TinyMLCollisionModel:
                 ray_r * 1.5 if ray_r < 15.0 else 99.0,
             )
 
-        # Target obstacle clearance parameter: 2.5m target stop clearance
-        target_clearance = float(feature_dict.get("target_clearance", 2.5))
+        # Target obstacle clearance parameter: default 4.5m safe standoff margin
+        target_clearance = float(feature_dict.get("target_clearance", 4.5))
 
         # Physics-based Time-to-Collision along vehicle travel trajectory
         ttc_speed_min = 0.4 if is_reversing else 0.5
@@ -171,11 +171,14 @@ class TinyMLCollisionModel:
         ttc = round(min(ttc, 99.0), 2)
 
         # Physics-based stopping distance required ensuring vehicle stops at target clearance
-        d_req_stop = (speed_ms * 0.25) + ((speed_ms ** 2) / (2.0 * 8.0)) + 0.5
-        is_in_stopping_zone = (threat_dist <= d_req_stop and speed_ms > 2.0)
-        is_stopped_at_safety = threat_dist <= (target_clearance + 0.25) and speed_ms <= 0.3
-        is_imminent = (threat_dist <= (target_clearance + 0.05)) or is_stopped_at_safety
-        is_critical_trigger = (is_in_stopping_zone or is_imminent) and threat_dist <= (target_clearance + 4.0)
+        # Heavy HEMM dumper realistic deceleration a_brake = 3.5 m/s^2, driver reaction t_react = 0.35s
+        a_brake = 3.5
+        t_react = 0.35
+        d_req_stop = (speed_ms * t_react) + ((speed_ms ** 2) / (2.0 * a_brake)) + target_clearance
+        is_in_stopping_zone = (threat_dist <= d_req_stop and speed_ms > 1.2)
+        is_stopped_at_safety = threat_dist <= (target_clearance + 0.35) and speed_ms <= 0.4
+        is_imminent = (threat_dist <= target_clearance) or is_stopped_at_safety
+        is_critical_trigger = is_in_stopping_zone or is_imminent
 
         if is_reversing:
             effective_e_brake = is_critical_trigger
@@ -184,17 +187,18 @@ class TinyMLCollisionModel:
                 self.aeb_latched = True
                 self.latch_dist = threat_dist
 
-            if threat_dist > (target_clearance + 8.0) or (self.aeb_latched and threat_dist > self.latch_dist + 2.0):
+            # Unlatch if driver reverses away or obstacle clears safely
+            if threat_dist > (target_clearance + 6.0) or (self.aeb_latched and threat_dist > self.latch_dist + 2.0):
                 self.aeb_latched = False
                 self.latch_dist = 0.0
 
-            effective_e_brake = self.aeb_latched
+            effective_e_brake = self.aeb_latched or is_critical_trigger
 
         if effective_e_brake or is_critical_trigger:
             risk_idx = 2
             risk_label = "CRITICAL"
             risk_confidence = 0.99 if is_reversing else max(risk_confidence, 0.99)
-        elif threat_dist <= (d_req_stop * 1.4 + 4.0) and threat_dist < (target_clearance + 18.0):
+        elif threat_dist <= (d_req_stop * 1.35 + 5.0) and threat_dist < 55.0:
             risk_idx = 1
             risk_label = "CAUTION"
         else:

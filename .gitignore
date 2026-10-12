@@ -127,3 +127,7 @@ $RECYCLE.BIN/
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
+
+
+FLEET_DASHBOARD_DEPLOYMENT.md
+SIH.zip

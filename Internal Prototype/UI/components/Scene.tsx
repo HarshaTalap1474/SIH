@@ -16,8 +16,8 @@ import { silenceThreeClockWarning } from "@/lib/threeWarnings";
 silenceThreeClockWarning();
 
 const targetColorObj = new THREE.Color();
-const FOG_DENSITIES = { heavy: 0.0135, medium: 0.0075, clear: 0.0028 } as const;
-const RAIN_HAZES = { high: 0.005, medium: 0.0025, none: 0.0 } as const;
+const FOG_DENSITIES = { heavy: 0.035, medium: 0.019, clear: 0.007 } as const;
+const RAIN_HAZES = { high: 0.008, medium: 0.004, none: 0.0 } as const;
 
 function FogEnvironment() {
   const fogRef = useRef<THREE.FogExp2>(null);
@@ -52,7 +52,7 @@ function FogEnvironment() {
   return (
     <>
       <color ref={bgRef} attach="background" args={[SCENE.background]} />
-      <fogExp2 ref={fogRef} attach="fog" args={[SCENE.background, 0.0135]} />
+      <fogExp2 ref={fogRef} attach="fog" args={[SCENE.background, 0.035]} />
     </>
   );
 }
